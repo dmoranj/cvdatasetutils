@@ -1,7 +1,7 @@
-import visualgenome as vg
-import config as conf
+import cvdatasetutils.visualgenome as vg
+import cvdatasetutils.config as conf
 import multiset as ms
-from cmdlogging import section_logger
+from mltrainingtools.cmdlogging import section_logger
 import pandas as pd
 import os
 from sklearn.model_selection import train_test_split
