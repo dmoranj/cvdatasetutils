@@ -79,7 +79,7 @@ def simplify(name):
 
 
 def check_image_exists(id):
-    img_path = os.path.join(os.path.join(conf.VG_BASE, conf.VG_IMAGES), str(id) + "." + conf.VG_IMAGE_EXTENSION)
+    img_path = os.path.join(os.path.join(vg.VG_BASE, conf.VG_IMAGES), str(id) + "." + conf.VG_IMAGE_EXTENSION)
     return os.path.isfile(img_path)
 
 
