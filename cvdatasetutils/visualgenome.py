@@ -1,6 +1,7 @@
 from PIL import Image
 import numpy as np
 import os
+import zipfile
 import json
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -331,6 +332,12 @@ def unzip_files(input_path):
 
     for file in zip_file_list:
         print('Uncompress [{}]'.format(file))
+        zipped = zipfile.ZipFile(file, 'r')
+        zipped.extractall(input_path)
+        zipped.close()
+
+        print('Removing [{}]'.format(file))
+        os.remove(file)
 
 
 def download():
@@ -343,7 +350,7 @@ def download():
     download_files(cf.IMAGE_FILES, images_folder)
 
     unzip_files(data_folder)
-    unzip_files(images_folder)
+    #unzip_files(images_folder)
 
 
 set_base('/home/dani/Documentos/Proyectos/Doctorado/cvdatasetutils/vgtests')
