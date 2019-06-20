@@ -8,6 +8,7 @@ import pandas as pd
 from mltrainingtools.cmdlogging import section_logger
 from nltk.corpus import wordnet
 import glob
+import requests
 import cvdatasetutils.config as cf
 
 VG_BASE = './'
@@ -284,9 +285,45 @@ def create_vg_folder_structure():
     [os.makedirs(os.path.join(VG_BASE, cf.VG_FOLDER_STRUCTURE[folder]), exist_ok=True) for folder in cf.VG_FOLDER_STRUCTURE.keys()]
 
 
-def download_files(file_list, output_path):
+def download_files(file_list, output_path, attempts=5, chunk_size=8*1024):
+
     for url in file_list:
-        print('Downloading [{}] to [{}]'.format(url, output_path))
+        filename = url[url.rfind('/')+1:]
+        target_file = os.path.join(output_path, filename)
+
+        if os.path.isfile(target_file):
+            print('Skipping [{}]'.format(filename))
+            continue
+
+        print('\nDownloading [{}] to [{}]'.format(url, output_path))
+
+        for i in range(attempts):
+            response = requests.get(url, stream=True)
+
+            if response.status_code == 200:
+                break
+            else:
+                print('Connection problem []. Retrying.'.format(response.status_code))
+
+        if response is None or not response.status_code == 200:
+            print("Couldn't download file []. Please try later.".format(url))
+            continue
+
+        current_size = 0
+
+        if 'Content-Length' in response.headers:
+            total_size = int(response.headers['Content-Length'])//1024
+        else:
+            total_size = 'Unknown'
+
+        with open(target_file, 'wb') as fd:
+            for chunk in response.iter_content(chunk_size=chunk_size):
+                print('\r Downloading [{:,}/{:,} Kb]'.format(current_size, total_size), end="")
+                fd.write(chunk)
+                fd.flush()
+                current_size += len(chunk)//1024
+
+        print('\r Downloading [{:,}/{:,} Kb]'.format(total_size, total_size), end="")
 
 
 def unzip_files(input_path):
@@ -309,4 +346,6 @@ def download():
     unzip_files(images_folder)
 
 
+set_base('/home/dani/Documentos/Proyectos/Doctorado/cvdatasetutils/vgtests')
+download()
 
