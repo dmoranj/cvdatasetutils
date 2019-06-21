@@ -292,7 +292,7 @@ def download_files(file_list, output_path, attempts=5, chunk_size=8*1024):
         filename = url[url.rfind('/')+1:]
         target_file = os.path.join(output_path, filename)
 
-        if os.path.isfile(target_file):
+        if os.path.isfile(target_file) or os.path.isfile(target_file[:target_file.rfind('.zip')]):
             print('Skipping [{}]'.format(filename))
             continue
 
@@ -340,6 +340,13 @@ def unzip_files(input_path):
         os.remove(file)
 
 
+def touch_images(folder):
+    for name in ['images', 'images2']:
+        with open(os.path.join(folder, name), 'w') as f1:
+            f1.write('downloaded')
+            f1.close()
+
+
 def download():
     create_vg_folder_structure()
 
@@ -350,9 +357,10 @@ def download():
     download_files(cf.IMAGE_FILES, images_folder)
 
     unzip_files(data_folder)
-    #unzip_files(images_folder)
+    unzip_files(images_folder)
 
+    touch_images(images_folder)
 
-set_base('/home/dani/Documentos/Proyectos/Doctorado/cvdatasetutils/vgtests')
-download()
+    # The merge of folders VG_100K and VG_100K_2 is still missing
+
 

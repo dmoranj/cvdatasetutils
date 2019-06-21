@@ -4,12 +4,15 @@ import multiset as ms
 from mltrainingtools.cmdlogging import section_logger
 import pandas as pd
 import os
+import cv2
 from sklearn.model_selection import train_test_split
 from spacy.lemmatizer import Lemmatizer
 from spacy.lang.en import LEMMA_INDEX, LEMMA_EXC, LEMMA_RULES
 from torch.utils.data import Dataset
+import matplotlib.pyplot as plt
 from skimage import io
 from torchvision import transforms
+from torch.utils.data import DataLoader
 import numpy as np
 
 lemmatizer = Lemmatizer(LEMMA_INDEX, LEMMA_EXC, LEMMA_RULES)
@@ -54,10 +57,12 @@ class VGOPD(Dataset):
         safe_idx = idx % self.pds.shape[0]
 
         try:
-            img_name = os.path.join(self.images_folder, str(self.images.iloc[safe_idx, 1]) + "." + conf.VG_IMAGE_EXTENSION)
+            img_id = self.images.iloc[safe_idx, 1]
+            img_name = os.path.join(self.images_folder, str(img_id) + "." + conf.VG_IMAGE_EXTENSION)
         except:
             safe_idx = 2
-            img_name = os.path.join(self.images_folder, str(self.images.iloc[safe_idx, 1]) + "." + conf.VG_IMAGE_EXTENSION)
+            img_id = self.images.iloc[safe_idx, 1]
+            img_name = os.path.join(self.images_folder, str(img_id) + "." + conf.VG_IMAGE_EXTENSION)
 
         image = io.imread(img_name)
 
@@ -66,12 +71,12 @@ class VGOPD(Dataset):
 
         image = self.transforms(image)
 
-        pds = (self.pds.iloc[safe_idx, :].as_matrix().astype('float32'))[1:]
+        pds = (self.pds.loc[self.pds['image_id'] == img_id].iloc[:, 2:].values.astype('float32'))
 
         return image, pds
 
     def get_labels(self):
-        return self.pds.columns
+        return self.pds.columns[2:]
 
 
 def simplify(name):
@@ -170,19 +175,18 @@ def filter_top_objects(image_df, global_objects, object_number):
     filtered = pd.merge(image_df, selected_objects, on='name', how='right')
     sums = filtered.groupby(['image_id']).sum()
 
-    filtered = pd.merge(filtered, sums, on='image_id', how='left')
+    filtered = pd.merge(filtered, sums[['p']], on='image_id', how='left')
     filtered['pd'] = filtered['p_x'] / filtered['p_y']
 
     filtered = filtered[['image_id', 'name', 'pd']]
-    filtered = filtered.pivot(index='image_id', columns='name', values='pd').fillna(0).reset_index()
+    pivoted = filtered.pivot(index='image_id', columns='name', values='pd').fillna(0).reset_index()
 
-    return filtered
+    return pivoted
 
 def split_distributions(data_df, perc):
-    X = data_df.loc[:, 'image_id']
-    Y = data_df.loc[:, data_df.columns != 'image_id']
+    X = data_df.loc[:, ['image_id']]
 
-    return train_test_split(X, Y, test_size=perc)
+    return train_test_split(X, data_df, test_size=perc)
 
 
 def save_distributions(output_path, splits):
@@ -199,7 +203,7 @@ def generate_vgopd_from_vg(output_path, input_path, top_objects, perc):
     section = section_logger()
 
     section('Loading Visual Genome')
-    data = vg.load_visual_genome(input_path)
+    data = vg.load_visual_genome(os.path.join(input_path, conf.VG_DATA))
 
     section('Creating distributions')
     global_objects, data_pd = extract_distributions(data)
@@ -216,4 +220,32 @@ def generate_vgopd_from_vg(output_path, input_path, top_objects, perc):
     save_distributions(output_path, splits)
 
 
-#generate_vgopd_from_vg(conf.DATA_FOLDER, conf.VG_BASE, conf.TOP_OBJECTS, conf.SPLIT_DISTRIBUTION)
+def show_example(inputs, outputs, labels, ranking=5, colormap=None):
+    top_5 = np.argpartition(outputs[0, :], -ranking)[-ranking:].tolist()
+    top_5_names = ", ".join([labels[p] for p in top_5])
+
+    fig = plt.figure(frameon=False)
+    image = np.array(inputs)
+    image = image.transpose(1, 2, 0)
+    plt.imshow(image, cmap=colormap)
+    plt.text(-5, -8, top_5_names, horizontalalignment='left', verticalalignment='center', color='green')
+    plt.tight_layout()
+    plt.imshow(image)
+    plt.show()
+    cv2.waitKey(0)
+
+
+def evaluate_vgopd_datasets(input_path, with_dataloader=False):
+    batch_size=5
+    vgopd_test = VGOPD(dataset_folder=input_path, images_folder=os.path.join(vg.VG_BASE, conf.VG_IMAGES))
+    vgopd_gen = DataLoader(vgopd_test, batch_size=batch_size, shuffle=True, num_workers=7)
+
+    if with_dataloader:
+        for inputs, labels in vgopd_gen:
+            for j in range(batch_size):
+                show_example(inputs[j, :, :, :], labels[j, :], vgopd_test.get_labels())
+    else:
+        for i in range(batch_size):
+            image, pd = vgopd_test[i]
+            show_example(image, pd, vgopd_test.get_labels())
+
