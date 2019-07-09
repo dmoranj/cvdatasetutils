@@ -4,11 +4,11 @@ VG_OBJECTS = "objects.json"
 VG_RELATIONSHIPS = "relationships.json"
 VG_ANALYTICS='./analytics'
 VG_DATA = './data'
-VG_IMAGES='images'
+VG_IMAGES='Images'
 VG_IMAGE_EXTENSION='jpg'
 
 SPLIT_DISTRIBUTION = 0.2
-MAX_LOADED_IMAGES = 200000
+MAX_LOADED_IMAGES = 2000000
 TOP_OBJECTS = 1000
 GLOBAL_OBJECTS_FILE = 'global_objects.csv'
 IMAGE_OBJ_PD_FILE = 'image_objs.csv'

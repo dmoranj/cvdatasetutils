@@ -8,6 +8,7 @@ import cv2
 from sklearn.model_selection import train_test_split
 from spacy.lemmatizer import Lemmatizer
 from spacy.lang.en import LEMMA_INDEX, LEMMA_EXC, LEMMA_RULES
+import spacy
 from torch.utils.data import Dataset
 import matplotlib.pyplot as plt
 from skimage import io
@@ -16,6 +17,7 @@ from torch.utils.data import DataLoader
 import numpy as np
 
 lemmatizer = Lemmatizer(LEMMA_INDEX, LEMMA_EXC, LEMMA_RULES)
+nlp = spacy.load('en_core_web_sm')
 
 
 class VGOPD(Dataset):
@@ -80,7 +82,9 @@ class VGOPD(Dataset):
 
 
 def simplify(name):
-    return lemmatizer(name, "NOUN")[0]
+    filtered = filter(lambda token: token.pos_ == "NOUN", nlp(name))
+    lemmatized = map(lambda token: token.lemma_, filtered)
+    return " ".join(lemmatized)
 
 
 def check_image_exists(id):
@@ -94,6 +98,7 @@ def extract_distributions(data, max_imgs=conf.MAX_LOADED_IMAGES):
     log('Extracting distributions ')
 
     global_objects = ms.Multiset()
+    occurrences = ms.Multiset()
     images = []
 
     for i, image in enumerate(data['objects']):
@@ -103,7 +108,7 @@ def extract_distributions(data, max_imgs=conf.MAX_LOADED_IMAGES):
         if not check_image_exists(image['image_id']):
             print('Skipping unexistent image: {}.jpg'.format(image['image_id']))
 
-        if i % 10000 == 0:
+        if i % 25 == 0:
             log("Processing image {}".format(i))
 
         image_objs = {}
@@ -112,15 +117,24 @@ def extract_distributions(data, max_imgs=conf.MAX_LOADED_IMAGES):
         objs = ms.Multiset()
         objs_pd = {}
         total = 0
+        appeared = set()
 
         for j, obj in enumerate(image['objects']):
             if len(obj['names']) > 0:
                 obj_name = obj['names'][0]
                 obj_name = simplify(obj_name)
+
+                if len(obj_name.strip()) == 0:
+                    continue
+
                 total += 1
+                appeared.add(obj_name)
 
                 global_objects.add(obj_name)
                 objs.add(obj_name)
+
+        for obj in appeared:
+            occurrences.add(obj)
 
         for key in objs.distinct_elements():
             objs_pd[key] = objs.get(key, 0) / total
@@ -129,21 +143,23 @@ def extract_distributions(data, max_imgs=conf.MAX_LOADED_IMAGES):
 
         images.append(image_objs)
 
-    return global_objects, images
+    return global_objects, occurrences, images
 
 
-def convert_to_dataframe(data_pd, global_objects):
+def convert_to_dataframe(data_pd, global_objects, occurrences):
     # Create dataframe of objects
     obj_data = {
         'id': [],
         'name': [],
-        'number': []
+        'number': [],
+        'occurrences': []
     }
 
     for i, obj in enumerate(global_objects.distinct_elements()):
         obj_data['id'].append(i)
         obj_data['name'].append(obj)
         obj_data['number'].append(global_objects.get(obj, 0))
+        obj_data['occurrences'].append(occurrences.get(obj, 0))
 
     obj_df = pd.DataFrame(data=obj_data)
 
@@ -200,16 +216,17 @@ def save_distributions(output_path, splits):
 
 
 def generate_vgopd_from_vg(output_path, input_path, top_objects, perc):
+    vg.set_base(input_path)
     section = section_logger()
 
     section('Loading Visual Genome')
     data = vg.load_visual_genome(os.path.join(input_path, conf.VG_DATA))
 
     section('Creating distributions')
-    global_objects, data_pd = extract_distributions(data)
+    global_objects, occurrences, data_pd = extract_distributions(data)
 
     section('Converting to DataFrame')
-    obj_df, image_df = convert_to_dataframe(data_pd, global_objects)
+    obj_df, image_df = convert_to_dataframe(data_pd, global_objects, occurrences)
     save_raw_data(output_path, obj_df, image_df)
 
     section('Filtering objects')
