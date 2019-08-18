@@ -266,3 +266,7 @@ def evaluate_vgopd_datasets(input_path, with_dataloader=False):
             image, pd = vgopd_test[i]
             show_example(image, pd, vgopd_test.get_labels())
 
+
+if __name__== "__main__":
+    generate_vgopd_from_vg('/home/dani/Documentos/Proyectos/Doctorado/Datasets/VGOPD',
+                           '/home/dani/Documentos/Proyectos/Doctorado/Datasets/vgtests/', 5000, 0.10)

@@ -4,7 +4,7 @@ VG_OBJECTS = "objects.json"
 VG_RELATIONSHIPS = "relationships.json"
 VG_ANALYTICS='./analytics'
 VG_DATA = './data'
-VG_IMAGES='Images'
+VG_IMAGES='images'
 VG_IMAGE_EXTENSION='jpg'
 
 SPLIT_DISTRIBUTION = 0.2
@@ -45,3 +45,17 @@ VG_FOLDER_STRUCTURE = {
     'VG_ANALYTICS': VG_ANALYTICS,
     'VG_IMAGES': VG_IMAGES
 }
+
+# Pascal VOC Configuration
+VOC_IMAGES="JPEGImages"
+VOC_ANNOTATIONS="Annotations"
+
+
+
+
+
+
+# General configuration
+CUDA_DEVICE='0'
+STEPS_PER_EPOCH=500
+BATCH_LOG_FREQUENCY=50
