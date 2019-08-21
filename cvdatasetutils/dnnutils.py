@@ -2,12 +2,14 @@ import torchvision
 import torch.nn as nn
 
 
-def load_pretrained(num_classes, backbone, finetune=False, remove_linear=True):
+def load_pretrained(num_classes, backbone, finetune=False, remove_linear=True, finetune_skipping=None):
     if backbone == "RESNET101":
         print("Using RESNET 101 as the Backbone")
         feature_extractor = torchvision.models.resnet101(pretrained=True)
 
-        finetune_skipping = 290
+        if finetune_skipping is None:
+            finetune_skipping = 290
+
         freeze_layers(feature_extractor, finetune, finetune_skipping)
 
         num_ftrs = feature_extractor.fc.in_features
@@ -18,7 +20,9 @@ def load_pretrained(num_classes, backbone, finetune=False, remove_linear=True):
         print("Using VGG16 as the Backbone")
         feature_extractor = torchvision.models.vgg16(pretrained=True)
 
-        finetune_skipping = 25
+        if finetune_skipping is None:
+            finetune_skipping = 25
+
         freeze_layers(feature_extractor, finetune, finetune_skipping)
 
         if remove_linear:
