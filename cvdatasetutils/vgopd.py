@@ -268,5 +268,5 @@ def evaluate_vgopd_datasets(input_path, with_dataloader=False):
 
 
 if __name__== "__main__":
-    generate_vgopd_from_vg('/home/dani/Documentos/Proyectos/Doctorado/Datasets/VGOPD',
-                           '/home/dani/Documentos/Proyectos/Doctorado/Datasets/vgtests/', 5000, 0.10)
+    generate_vgopd_from_vg('/home/dani/Documentos/Proyectos/Doctorado/Datasets/VGOPD/100C',
+                           '/home/dani/Documentos/Proyectos/Doctorado/Datasets/vgtests/', 100, 0.10)

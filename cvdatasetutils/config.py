@@ -2,6 +2,7 @@
 # Default location of Visual Genome files
 VG_OBJECTS = "objects.json"
 VG_RELATIONSHIPS = "relationships.json"
+VG_IMAGE_DATA="image_data.json"
 VG_ANALYTICS='./analytics'
 VG_DATA = './data'
 VG_IMAGES='images'

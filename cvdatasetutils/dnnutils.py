@@ -1,5 +1,11 @@
 import torchvision
 import torch.nn as nn
+import json
+
+
+def load_json(path):
+    with open(path, "r") as f:
+        return json.load(f)
 
 
 def load_pretrained(num_classes, backbone, finetune=False, remove_linear=True, finetune_skipping=None):

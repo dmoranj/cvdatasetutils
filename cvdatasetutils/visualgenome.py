@@ -9,20 +9,24 @@ from nltk.corpus import wordnet
 import glob
 import requests
 import cvdatasetutils.config as cf
+from cvdatasetutils.dnnutils import load_json
 
 
 VG_BASE = './'
 
 
-def load_json(path):
-    with open(path, "r") as f:
-        return json.load(f)
+def compute_image_map(image_data):
+    return {image['image_id']:image for image in image_data}
 
 
 def load_visual_genome(vgbase):
+    image_data = load_json(os.path.join(vgbase, cf.VG_IMAGE_DATA))
+
     return {
         "objects": load_json(os.path.join(vgbase, cf.VG_OBJECTS)),
-        "relationships": load_json(os.path.join(vgbase, cf.VG_RELATIONSHIPS))
+        "relationships": load_json(os.path.join(vgbase, cf.VG_RELATIONSHIPS)),
+        "images": image_data,
+        "imageIdMap": compute_image_map(image_data)
     }
 
 
@@ -91,17 +95,17 @@ def extract_relationship_dataframe(vg, limit=10, report=2e5):
     return rdf
 
 
-def extract_object_data(img_id):
+def extract_object_data(img_id, img_w, img_h):
     def extractor(obj):
         return [
             obj['object_id'],
             "|".join(obj['synsets']),
             "|".join(obj['names']),
             img_id,
-            obj['x'],
-            obj['y'],
-            obj['h'],
-            obj['w']
+            obj['x']/img_w,
+            obj['y']/img_h,
+            obj['h']/img_h,
+            obj['w']/img_w
         ]
 
     return extractor
@@ -121,7 +125,10 @@ def extract_object_dataframe(vg, limit=10, report=2e5):
         if counter % report == 0:
             section("Loaded objects in {} images".format(counter))
 
-        rows = map(extract_object_data(img['image_id']), img['objects'])
+        current_image = vg['imageIdMap'][img['image_id']]
+        assert current_image['image_id'] == img['image_id'], 'Position in the list {} does not correspond to ID {}'.format(img['image_id'], current_image['image_id'])
+
+        rows = map(extract_object_data(img['image_id'], current_image['width'], current_image['height']), img['objects'])
         data.extend(rows)
 
     odf = pd.DataFrame(data, columns=['object_id', 'synsets', 'names', 'img', 'x', 'y', 'h', 'w'])

@@ -22,7 +22,7 @@ class PascalVOCOR(Dataset):
 
         image, image_np = load_image(os.path.join(self.images_folder, annotations['filename']))
 
-        return image, annotations
+        return image_np, annotations
 
     def get_raw(self):
         return self.voc
