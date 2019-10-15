@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="cvdatasetutils_dmoranj",
-    version="0.0.4",
+    version="0.0.6",
     author="Daniel Morán Jiménez",
     author_email="dmoranj@gmail.com",
     description="Utils to download and manage a selection of Computer Vision datasets",

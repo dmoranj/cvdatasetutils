@@ -60,11 +60,11 @@ class VGOPD(Dataset):
 
         try:
             img_id = self.images.iloc[safe_idx, 1]
-            img_name = os.path.join(self.images_folder, str(img_id) + "." + conf.VG_IMAGE_EXTENSION)
+            img_name = self.create_img_name(img_id)
         except:
             safe_idx = 2
             img_id = self.images.iloc[safe_idx, 1]
-            img_name = os.path.join(self.images_folder, str(img_id) + "." + conf.VG_IMAGE_EXTENSION)
+            img_name = self.create_img_name(img_id)
 
         image = io.imread(img_name)
 
@@ -76,6 +76,14 @@ class VGOPD(Dataset):
         pds = (self.pds.loc[self.pds['image_id'] == img_id].iloc[:, 2:].values.astype('float32'))
 
         return image, pds
+
+    def create_img_name(self, img_id):
+        if conf.VG_IMAGE_EXTENSION in str(img_id):
+            image_name = str(img_id)
+        else:
+            image_name = str(img_id) + "." + conf.VG_IMAGE_EXTENSION
+
+        return os.path.join(self.images_folder, image_name)
 
     def get_labels(self):
         return self.pds.columns[2:]
