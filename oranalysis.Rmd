@@ -1,0 +1,171 @@
+---
+title: "Object Recognition Dataset Analysis"
+output: beamer_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+
+library(splitstackshape)
+set.seed(1)
+```
+
+``` {r, include=FALSE}
+vocDataPath <- './analytics/voc_df.csv'
+vgDataPath <- './analytics/vg_df.csv'
+cocoDataPath <- './analytics/coco_df.csv'
+
+vocData <- read.csv(vocDataPath)
+vgData <- read.csv(vgDataPath)
+cocoData <- read.csv(cocoDataPath)
+```
+
+```{r, include=FALSE}
+vocFragment <- vocData %>%
+  select(imageId = img, x, y, w, h, label = names ) %>%
+  mutate(dataset = "VOC", imageId=as.character(imageId))
+
+vgFragment <- vgData %>%
+  select(imageId = img, x, y, w, h, label = names ) %>%
+  mutate(dataset = "VG", imageId=as.character(imageId), x = x + w/2, y = y + h/2)
+
+cocoFragment <- cocoData %>%
+  select(imageId = image_id, x, y, w, h, label = name ) %>%
+  mutate(dataset = "COCO", imageId=as.character(imageId), x = x + w/2, y = y + h/2)
+
+globalData <- rbind(vocFragment, vgFragment, cocoFragment) %>%
+  mutate(imageId = as.factor(imageId), dataset=as.factor(dataset))
+
+```
+
+# General statistics
+
+```{r}
+generalStats <- globalData %>%
+  group_by(dataset) %>%
+  summarize(images=n_distinct(imageId), objects=n(), labels=n_distinct(label), objPerImg=objects/images) %>%
+  arrange(desc(images), objects)
+
+knitr::kable(generalStats)
+```
+
+# Object Location
+
+```{r}
+globalData <- globalData %>%
+  mutate(area = w * h)
+```
+
+```{r, fig.width=12, fig.height=5}
+sampledData <- globalData %>%
+  group_by(dataset) %>%
+  sample_n(2000)
+
+sampledData %>%
+  select(dataset, x, y) %>%
+  ggplot(aes(x = x, y = y, fill=dataset)) +
+    facet_wrap(~ dataset) +
+    geom_point(shape=21, alpha=0.2)
+```
+
+# Object Size
+
+```{r, fig.width=12, fig.height=5}
+sampledData %>%
+  select(dataset, w, h, area) %>%
+  ggplot(aes(x = w, y = h, fill=dataset)) +
+    facet_wrap(~ dataset) +
+    geom_point(shape=21, alpha=0.2)
+```
+
+# Number of objects per image
+
+```{r, fig.width=12, fig.height=8}
+globalData %>%
+  group_by(dataset, imageId) %>%
+  summarize(objects=n()) %>%
+  ggplot(aes(x=dataset, y=objects, fill=dataset)) +
+    geom_boxplot(alpha=0.7)
+```
+
+# Number of objects per image (descending) (Maybe better as a percentage of images...)
+
+```{r, fig.width=12, fig.height=10}
+objectsPerImage <- globalData %>%
+  group_by(dataset, imageId) %>%
+  summarize(objects=n()) %>%
+  arrange(desc(objects)) %>%
+  mutate(id=sequence(n())) %>%
+  mutate(rank = rank(desc(objects))) %>%
+  filter(id < 5000) 
+
+objectsPerImage %>%
+ ggplot(aes(x=id, y=objects, color=dataset)) +
+   geom_smooth(stat='identity', alpha=0.7)
+```
+
+# Instances per label
+
+```{r, fig.width=12, fig.height=8}
+globalData %>%
+  group_by(dataset, label) %>%
+  summarize(objects=n()) %>%
+  filter(label != "person") %>%
+  ggplot(aes(x=dataset, y=objects, fill=dataset)) +
+    geom_boxplot(alpha=0.7) +
+    scale_y_log10()
+```
+
+# Number of instances per label (descending)
+
+```{r, fig.width=12, fig.height=10}
+instancesPerLabel <- globalData %>%
+  group_by(dataset, label) %>%
+  summarize(objects=n()) %>%
+  arrange(desc(objects)) %>%
+  mutate(id=sequence(n())) %>%
+  mutate(rank = rank(desc(objects))) %>%
+  filter(id < 100) 
+
+instancesPerLabel %>%
+ ggplot(aes(x=id, y=objects, color=dataset)) +
+   geom_smooth(stat='identity', alpha=0.7) +
+   scale_y_log10()
+```
+
+# Same as before as a percentage of the total images in the dataset (i.e.: normalized)
+
+
+# Top 10 labels (VOC)
+
+```{r}
+top10 <- instancesPerLabel %>%
+  filter(id < 10) %>%
+  select(dataset, label, instances=objects) %>%
+  arrange(dataset, desc(instances))
+```
+
+```{r}
+knitr::kable(filter(top10, dataset=="VOC"))
+```
+
+# Top 10 labels (COCO)
+
+```{r}
+knitr::kable(filter(top10, dataset=="COCO"))
+```
+
+# Top 10 labels (VG)
+
+```{r}
+knitr::kable(filter(top10, dataset=="VG"))
+```
+
+
+# (Correlación entre objetos por imagen)
+
+
