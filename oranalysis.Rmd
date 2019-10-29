@@ -5,12 +5,16 @@ output: beamer_presentation
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(dpi = 72)
+knitr::opts_chunk$set(dev="png")
 
 library(tidyr)
 library(dplyr)
 library(ggplot2)
-
 library(splitstackshape)
+library(bnlearn)
+library(stringr)
+
 set.seed(1)
 ```
 
@@ -18,16 +22,22 @@ set.seed(1)
 vocDataPath <- './analytics/voc_df.csv'
 vgDataPath <- './analytics/vg_df.csv'
 cocoDataPath <- './analytics/coco_df.csv'
+restrictedDataPath <- './analytics/restricted_df.csv'
 
 vocData <- read.csv(vocDataPath)
 vgData <- read.csv(vgDataPath)
 cocoData <- read.csv(cocoDataPath)
+restrictedData <- read.csv(restrictedDataPath)
 ```
 
 ```{r, include=FALSE}
 vocFragment <- vocData %>%
   select(imageId = img, x, y, w, h, label = names ) %>%
   mutate(dataset = "VOC", imageId=as.character(imageId))
+
+restrictedFragment <- restrictedData %>%
+  select(imageId = image_id, x, y, w, h, label = name ) %>%
+  mutate(dataset = "Restricted", imageId=as.character(imageId), x = x + w/2, y = y + h/2)
 
 vgFragment <- vgData %>%
   select(imageId = img, x, y, w, h, label = names ) %>%
@@ -37,11 +47,38 @@ cocoFragment <- cocoData %>%
   select(imageId = image_id, x, y, w, h, label = name ) %>%
   mutate(dataset = "COCO", imageId=as.character(imageId), x = x + w/2, y = y + h/2)
 
-globalData <- rbind(vocFragment, vgFragment, cocoFragment) %>%
-  mutate(imageId = as.factor(imageId), dataset=as.factor(dataset))
+globalData <- rbind(vocFragment, vgFragment, cocoFragment, restrictedFragment) %>%
+  mutate(imageId = as.factor(imageId), dataset=as.factor(dataset), label=as.factor(label))
 
 ```
 
+# Summary
+
+This document contains the following sections:
+
+* An introduction to the problem we are addressing
+* A brief study of the general characteristics of each datasets, with regard to Object Detection and classification
+* An analysis of four LDA models that were trained with the object content of each of the images to group the images into topics
+* An analysis of how to exploit these topics for improved object recognition
+
+# Introduction
+
+Object recognition. Use of non-object independence for improve detection
+
+
+# The Datasets
+
+Four datasets were compared along this document:
+
+* Three well-stablished Object Recognition datasets: Pascal VOC, Microsot COCO and Visual Genome
+* A restricted and cleaned version of Visual Genome. As it will be presented in the following section, from the studied datasets, Visual Genome is the
+most densely anotated and contains the higher number of classes, but this comes at the price of a lot of annotation noise. To improve its characteristics,
+a cleaned version (RestrictedVG) was created with the following characteristics:
+  * Its includes only objects whose labels could be described by exactly one Wordnet Synset
+  * It doesn't include objects with an area smaller than a given threshold
+  * Among those, it includes only the 1000 classes with more instances
+  * It doesn't include images with less than 10 classes
+  
 # General statistics
 
 ```{r}
@@ -53,6 +90,12 @@ generalStats <- globalData %>%
 knitr::kable(generalStats)
 ```
 
+Things to remark:
+
+* VOC has a really low number of objects per image, on average, making it improbable to benefit from object context.
+* The number of labels in VG is based on exact string matching, but VG's labels are noisy and contain typos or variants. The real number is probably way lower
+  but there's no clear way of cleaning it.
+
 # Object Location
 
 ```{r}
@@ -60,7 +103,7 @@ globalData <- globalData %>%
   mutate(area = w * h)
 ```
 
-```{r, fig.width=12, fig.height=5}
+```{r, dpi=72, fig.width=12, fig.height=10}
 sampledData <- globalData %>%
   group_by(dataset) %>%
   sample_n(2000)
@@ -74,7 +117,7 @@ sampledData %>%
 
 # Object Size
 
-```{r, fig.width=12, fig.height=5}
+```{r, dpi=72, fig.width=12, fig.height=10}
 sampledData %>%
   select(dataset, w, h, area) %>%
   ggplot(aes(x = w, y = h, fill=dataset)) +
@@ -82,59 +125,138 @@ sampledData %>%
     geom_point(shape=21, alpha=0.2)
 ```
 
+# Object Area vs Location
+
+```{r, dpi=72, fig.width=12, fig.height=10}
+sampledData %>%
+  select(dataset, x, y, area) %>%
+  ggplot(aes(x = x, y = y, color=area)) +
+    facet_wrap(~ dataset) +
+    geom_point(size=1, alpha=0.65)
+```
+
+# Global area distribution
+
+```{r, dpi=72, fig.width=12, fig.height=3}
+globalData %>%
+  filter(area <= 1, area > 0) %>%
+  ggplot(aes(x=dataset, y=area, fill=dataset)) +
+    geom_boxplot() +
+    coord_flip()
+```
+
+This graph shows areas in the normalized range [0, 1]. Some examples where remove from VG with areas greater than one or smaller than zero.
+
+# Top 10 objects with bigger mean area
+
+```{r, dpi=72, fig.width=12, fig.height=8}
+areaSummaries <- globalData %>%
+  select(dataset, label, area) %>%
+  group_by(dataset, label) %>%
+  summarize(areaMean=mean(area)) %>%
+  arrange(desc(areaMean)) %>%
+  mutate(id=sequence(n())) %>%
+  mutate(rank = rank(desc(areaMean))) %>%
+  filter(id <= 10)
+
+globalData %>%
+  select(dataset, label, area) %>%
+  semi_join(areaSummaries, by=c('dataset', 'label')) %>%
+  ggplot(aes(x=label, y=area, fill=label)) +
+    geom_boxplot(alpha=0.6) +
+    facet_wrap(~ dataset, ncol=2, scales = "free") +
+    theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+    coord_flip()
+```
+
+# Top 10 objects with smaller mean area
+
+```{r, dpi=72, fig.width=12, fig.height=8}
+areaSummaries <- globalData %>%
+  select(dataset, label, area) %>%
+  group_by(dataset, label) %>%
+  summarize(areaMean=mean(area)) %>%
+  arrange(desc(areaMean)) %>%  
+  mutate(id=sequence(n())) %>%
+  mutate(rank = rank(desc(areaMean))) %>%
+  filter(id > max(id) - 10)
+
+globalData %>%
+  select(dataset, label, area) %>%
+  semi_join(areaSummaries, by=c('dataset', 'label')) %>%
+  ggplot(aes(x=label, y=area, fill=label)) +
+    geom_boxplot(alpha=0.6) +
+    facet_wrap(~ dataset, ncol=2, scales="free") +
+    theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+    coord_flip()
+```
+
 # Number of objects per image
 
-```{r, fig.width=12, fig.height=8}
+```{r, dpi=72, fig.width=12, fig.height=4}
 globalData %>%
   group_by(dataset, imageId) %>%
   summarize(objects=n()) %>%
   ggplot(aes(x=dataset, y=objects, fill=dataset)) +
-    geom_boxplot(alpha=0.7)
+    geom_boxplot(alpha=0.6) +
+    scale_y_log10() +
+    coord_flip()
 ```
+
+As we can see, the number of objects per image is very low in the case of VOC to be useful to use context cooccurrence as a source of information for object detection.
+
+We can see that VG is densely annotated, having little to no images with fewer than 10 objects.
 
 # Number of objects per image (descending) (Maybe better as a percentage of images...)
 
-```{r, fig.width=12, fig.height=10}
+```{r, dpi=72, fig.width=12, fig.height=5}
 objectsPerImage <- globalData %>%
   group_by(dataset, imageId) %>%
   summarize(objects=n()) %>%
   arrange(desc(objects)) %>%
   mutate(id=sequence(n())) %>%
   mutate(rank = rank(desc(objects))) %>%
-  filter(id < 5000) 
+  filter(id < 20000) 
 
 objectsPerImage %>%
  ggplot(aes(x=id, y=objects, color=dataset)) +
    geom_smooth(stat='identity', alpha=0.7)
 ```
 
+As the plot shows, the number of objects per image seem to converge asymptotically to the mean number of objects per image of the dataset. For COCO and VG that means a high percentage of the images contain above 10 or more objects, while for VOC just a few contains more than one object per image.
+
 # Instances per label
 
-```{r, fig.width=12, fig.height=8}
+```{r, dpi=72, fig.width=12, fig.height=4}
 globalData %>%
   group_by(dataset, label) %>%
   summarize(objects=n()) %>%
   filter(label != "person") %>%
   ggplot(aes(x=dataset, y=objects, fill=dataset)) +
-    geom_boxplot(alpha=0.7) +
-    scale_y_log10()
+    geom_boxplot(alpha=0.6) +
+    scale_y_log10() +
+    coord_flip()
 ```
+
+As expected due to the high number of labels and the noise in the dataset, most of the classes in Visual Genome contain just a few examples, while still containing a high number of classes with a very high number. 
 
 # Number of instances per label (descending)
 
-```{r, fig.width=12, fig.height=10}
+```{r, dpi=72, fig.width=12, fig.height=10}
 instancesPerLabel <- globalData %>%
   group_by(dataset, label) %>%
   summarize(objects=n()) %>%
   arrange(desc(objects)) %>%
   mutate(id=sequence(n())) %>%
   mutate(rank = rank(desc(objects))) %>%
-  filter(id < 100) 
+  filter(id < 1000) 
 
 instancesPerLabel %>%
- ggplot(aes(x=id, y=objects, color=dataset)) +
-   geom_smooth(stat='identity', alpha=0.7) +
-   scale_y_log10()
+  select(label=id, instances=objects, dataset) %>%
+  ggplot(aes(x=label, y=instances, color=dataset)) +
+    geom_smooth(stat='identity', alpha=0.7) +
+    scale_y_log10() +
+    scale_x_log10()
 ```
 
 # Same as before as a percentage of the total images in the dataset (i.e.: normalized)
@@ -166,6 +288,313 @@ knitr::kable(filter(top10, dataset=="VG"))
 ```
 
 
-# (Correlación entre objetos por imagen)
+# Top 10 labels (Restricted VG)
+
+```{r}
+knitr::kable(filter(top10, dataset=="Restricted VG"))
+```
+
+# Conditional independence analysis (I)
+
+```{r}
+getObjectAdjacency <- function(data, dsName) {
+  bnFileName <- paste('./analytics/', dsName, 'BN.csv', sep="_")
+  
+  if (file.exists(bnFileName)) {
+    bnDf <- read.csv(bnFileName)
+  } else {
+    sampledIds <- data %>%
+      filter(dataset == dsName) %>%
+      select(imageId) %>%
+      distinct()
+      
+    bnDf <- data %>%
+      filter(dataset == dsName) %>%
+      semi_join(sampledIds, by='imageId') %>%
+      ungroup() %>%
+      mutate(label = as.factor(as.character(label)), positive=1) %>%
+      group_by(imageId, label) %>%
+      summarize(positive=prod(positive)) %>%
+      spread(label, positive, fill=0) %>%
+      ungroup() %>%
+      select(-imageId)
+    
+    bnDf <- as.data.frame(lapply(bnDf, as.factor))
+    write.csv(labelTuples, bnFileName)
+  }
+
+  bnDf
+}
+
+bnCoco <- getObjectAdjacency(globalData, "COCO")
+bnVOC <- getObjectAdjacency(globalData, "VOC")
+bnRestricted <- getObjectAdjacency(globalData, "Restricted")
+```
+
+```{r}
+createMIComputer <- function(dataset) {
+  function (label1, label2) {
+    res <- ci.test(label1, label2, data=dataset)
+    res$statistic[[1]]
+  }  
+} 
+
+computeMi <- function(dsName, ds, samples=NULL) {
+  miFileName <- paste('./analytics/', dsName, 'MI.csv', sep="_")
+  
+  if (file.exists(miFileName)) {
+    labelTuples <- read.csv(miFileName)
+  } else {
+    labels <- colnames(ds)
+  
+    cocoComputer <- createMIComputer(ds)
+    
+    labelTuples <- t(combn(labels, 2))
+    labelTuples <- data.frame(l1=labelTuples[,1], l2=labelTuples[,2]) 
+    
+    if (!is.null(samples)) {
+      labelTuples <- sample_n(labelTuples, samples)
+    }
+  
+    labelTuples$mi <- mapply(cocoComputer, str_replace(labelTuples$l1, " ", "."), str_replace(labelTuples$l2, " ", "."))
+    write.csv(labelTuples, miFileName)
+  }
+  
+  labelTuples$dataset <- dsName
+  labelTuples
+  
+}
+
+miCoco <- computeMi("COCO", bnCoco)
+miVOC <- computeMi("VOC", bnVOC)
+miRestricted <- computeMi("Restricted", bnRestricted, 10000)
+
+miData <- rbind(miCoco, miVOC, miRestricted)
+```
+
+```{r, fig.width=10}
+miData %>%
+  ggplot(aes(x=mi, fill=dataset)) +
+    geom_histogram(bins=30, color='black') +
+    scale_x_log10() +
+    facet_wrap(~ dataset, scales = 'free_y')
+```
+
+# Conditional independence analysis (II)
+
+```{r, fig.width=10}
+miData %>%
+  ggplot(aes(x=dataset, y=mi, fill=dataset)) +
+    geom_boxplot() +
+    scale_y_log10()
+```
+
+# LDA Topic analysis: number of non-zero words per model
+
+```{r}
+loadLdaTopics <- function(path) {
+  folders <- list.files(path)
+  
+  completeData <- data.frame()
+  
+  for (folder in folders) {
+    filename <- paste(folder, "_summary.csv", sep="")
+    filepath <- paste(path, folder, filename, sep="/")
+    
+    folderData <- read.csv(filepath, col.names = c('id', 'key', 'p', 'object'))
+    folderData$model <- folder
+    
+    completeData <- rbind(completeData, folderData)
+  }
+  
+  completeData %>%
+    mutate(model = as.factor(model))
+}
+
+VOCOPDData <- loadLdaTopics('/home/dani/Documentos/Proyectos/Doctorado/Datasets/VOCOPD/models/LDA_1000C')
+VOCOPDData$dataset <- "VOC"
+
+COCOOPDData <- loadLdaTopics('/home/dani/Documentos/Proyectos/Doctorado/Datasets/COCOOPD/models/LDA_1000C')
+COCOOPDData$dataset <- "COCO"
+
+VGOPDData <- loadLdaTopics('/home/dani/Documentos/Proyectos/Doctorado/Datasets/VGOPD/models/LDA_1000C')
+VGOPDData$dataset <- "VG"
+
+RestrictedOPDData <- loadLdaTopics('/home/dani/Documentos/Proyectos/Doctorado/Datasets/RestrictedOPD/models/LDA_1000C')
+RestrictedOPDData$dataset <- "Restricted"
+
+opdData <- rbind(VOCOPDData, COCOOPDData, VGOPDData, RestrictedOPDData)
+```
+
+```{r, dpi=72, fig.width=12, fig.height=8}
+threshold <- 0.00001
+
+opdData %>%
+  mutate(positive=ifelse(p > threshold, TRUE, FALSE)) %>%
+  group_by(dataset, model, key) %>%
+  summarize(positives=sum(positive)) %>%
+  ggplot(aes(x=model, y=positives, group=model, fill=model)) +
+    facet_wrap(~ dataset, scales="free", ncol=2) +
+    geom_boxplot(alpha=0.7) +
+    theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+    coord_flip()
+```
+
+# LDA Topic analysis: topic probability distribution per dataset
+
+```{r, dpi=72, fig.width=12, fig.height=8}
+threshold <- 0.00001
+
+opdData %>%
+  filter(p > threshold) %>%
+  ggplot(aes(x=p, fill=dataset)) +
+    facet_wrap(~ dataset, scales="free", ncol=2) +
+    geom_histogram(alpha=0.7, color="black", binwidth = 0.1) +
+    theme(axis.text.x = element_text(angle = 45, hjust=1))
+```
+
+# LDA Topic analysis: topic probability distribution per LDA model metaparameters
+
+```{r, dpi=72, fig.width=12, fig.height=8}
+threshold <- 0.00001
+
+opdData %>%
+  filter(p > threshold) %>%
+  ggplot(aes(x=p, fill=model)) +
+    facet_wrap(~ model, scales="free", ncol=3) +
+    geom_histogram(alpha=0.7, color="black", binwidth = 0.1) +
+    theme(axis.text.x = element_text(angle = 45, hjust=1))
+```
+
+
+# LDA Topic Analysis: VOC Topics
+
+```{r}
+threshold <- 0.05
+
+spreadPositives <- opdData %>%
+  mutate(positive=ifelse(p > threshold, TRUE, FALSE), dataset=as.factor(dataset)) %>%
+  group_by(dataset, model, key) %>%
+  summarize(positives=sum(positive)) %>%
+  filter(positives > 4) %>%
+  arrange(desc(positives))
+
+ldaModelData <- opdData %>% 
+  mutate(dataset=as.factor(dataset)) %>%
+  semi_join(spreadPositives, by=c('dataset', 'model', 'key')) %>%
+  filter(p > threshold) %>%
+  select(dataset, model, key, object, p) %>%
+  group_by(dataset, model, key) %>%
+  summarize(words = paste(object, collapse=", "), prob=paste(p, collapse=", ")) %>%
+  ungroup() %>%
+  select(dataset, model, key, words, prob) %>%
+  gather(attribute, values, -key, -model, -dataset) %>%
+  arrange(dataset, model, key)
+
+```
+
+
+```{r}
+ldaModelData %>%
+  filter(dataset == 'VOC')  %>%
+  select(model, key, values) %>%
+  head(10) %>%
+  knitr::kable()
+```
+
+# LDA Topic Analysis: COCO
+
+```{r}
+ldaModelData %>%
+  filter(dataset == 'COCO') %>%
+  select(model, key, values)  %>%
+  head(10) %>%
+  knitr::kable()
+```
+
+
+
+# LDA Topic Analysis: Visual Genome
+
+```{r}
+ldaModelData %>%
+  filter(dataset == 'VG')  %>%
+  select(model, key, values) %>%
+  head(10) %>%
+  knitr::kable()
+```
+
+# LDA Topic Analysis: Restricted Visual Genome
+
+```{r}
+ldaModelData %>%
+  filter(dataset == 'Restricted')  %>%
+  select(model, key, values) %>%
+  head(10) %>%
+  knitr::kable()
+```
+
+# LDA Topic Analysis: Restricted VG Examples LDA_100_16 (3)
+
+```{r, out.width="35%"}
+baseRestrictedPathEx <- '/home/dani/Documentos/Proyectos/Doctorado/Datasets/RestrictedOPD/models/LDA_1000C'
+modelEx <- 'LDA_100_16'
+
+getRestrictedEx <- function(folder, number) {
+  paste(baseRestrictedPathEx, modelEx, 'examples_201910231744', folder, number, sep='/')
+}
+
+examples <- c(getRestrictedEx('3', 'ex_51-3_5_7_9_17_20_22_27_34_44_52_64_70.jpg'),
+              getRestrictedEx('3', 'ex_63-3_16_34_64_71.jpg'),
+              getRestrictedEx('3', 'ex_95-3_5_9_17_20_24_34_39_51_67_82_95.jpg'),
+              getRestrictedEx('3', 'ex_530-3_16_17_24_64_67_68_90_96.jpg')
+              )
+ 
+knitr::include_graphics(examples)
+```
+
+# LDA Topic Analysis: Restricted VG Examples LDA_100_16 (9)
+
+```{r, out.width="35%"}
+baseRestrictedPathEx <- '/home/dani/Documentos/Proyectos/Doctorado/Datasets/RestrictedOPD/models/LDA_1000C'
+modelEx <- 'LDA_100_16'
+
+getRestrictedEx <- function(folder, number) {
+  paste(baseRestrictedPathEx, modelEx, 'examples_201910240653', folder, number, sep='/')
+}
+
+examples <- c(getRestrictedEx('9', 'ex_2-9_34_16_24_71_3_84_59_4_45.jpg'),
+              getRestrictedEx('9', 'ex_113-9_71_16_17_34_7_52_3_84_24_31_85_66.jpg'),
+              getRestrictedEx('9', 'ex_123-9_3_36_34_71_95_76_1_68_24_21_67_79_72_50_31_11_64_12.jpg'),
+              getRestrictedEx('9', 'ex_512-9_44_57_17_34_70_58_47_82_76_37.jpg')
+              )
+ 
+knitr::include_graphics(examples)
+```
+
+# Next steps: topic detectors
+
+Use standard classifiers to detect topic distribution: LDA Model provides topic distribution based on the objects in the image and a CNN tries to get the distribution 
+directly.
+
+
+# Next steps: use of inferenced data to improve object recognition
+
+Independent of the previous step, can be tested using the label and the LDA model to get an optimal value (not real but help to test the inference process itself)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

@@ -190,6 +190,7 @@ def convert_to_dataframe(data_pd, global_objects, occurrences):
 
 
 def save_raw_data(output_path, obj_df, image_df):
+    os.makedirs(output_path, exist_ok=True)
     obj_df.to_csv(os.path.join(output_path, conf.GLOBAL_OBJECTS_FILE))
     image_df.to_csv(os.path.join(output_path, conf.IMAGE_OBJ_PD_FILE))
 

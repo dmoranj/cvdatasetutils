@@ -8,7 +8,10 @@ def extract_distributions(data):
 
     log('Extracting distributions ')
 
-    frequencies = data.annotations[['image_id', 'name', 'class']].pivot_table(
+    raw_data = data.annotations.join(data.images.set_index("image_id"), on="image_id")[['file_name', 'name', 'class']]
+    raw_data.columns = ['image_id', 'name', 'class']
+
+    frequencies = raw_data.pivot_table(
         index='image_id',
         columns='name',
         values='class',
