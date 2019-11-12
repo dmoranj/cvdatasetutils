@@ -291,7 +291,7 @@ knitr::kable(filter(top10, dataset=="VG"))
 # Top 10 labels (Restricted VG)
 
 ```{r}
-knitr::kable(filter(top10, dataset=="Restricted VG"))
+knitr::kable(filter(top10, dataset=="Restricted"))
 ```
 
 # Conditional independence analysis (I)
@@ -332,6 +332,10 @@ bnRestricted <- getObjectAdjacency(globalData, "Restricted")
 ```
 
 ```{r}
+entropy <- function(p) {
+  -p * log(p)
+}
+
 createMIComputer <- function(dataset) {
   function (label1, label2) {
     res <- ci.test(label1, label2, data=dataset)
@@ -361,6 +365,9 @@ computeMi <- function(dsName, ds, samples=NULL) {
   }
   
   labelTuples$dataset <- dsName
+  p <- 1/length(levels(labelTuples$l1))
+  labelTuples$h <- entropy(p)
+  labelTuples$normMI <- labelTuples$mi / labelTuples$h
   labelTuples
   
 }
@@ -374,20 +381,76 @@ miData <- rbind(miCoco, miVOC, miRestricted)
 
 ```{r, fig.width=10}
 miData %>%
-  ggplot(aes(x=mi, fill=dataset)) +
+  ggplot(aes(x=normMI, fill=dataset)) +
     geom_histogram(bins=30, color='black') +
     scale_x_log10() +
-    facet_wrap(~ dataset, scales = 'free_y')
+    facet_wrap(~ dataset, scales = 'free_y', ncol = 2)
 ```
 
 # Conditional independence analysis (II)
 
 ```{r, fig.width=10}
 miData %>%
-  ggplot(aes(x=dataset, y=mi, fill=dataset)) +
+  ggplot(aes(x=dataset, y=normMI, fill=dataset)) +
     geom_boxplot() +
     scale_y_log10()
 ```
+
+# Top 10 MI (VOC)
+
+```{r}
+showTop10MI <- function(datasetName) {
+  miData %>%
+    filter(dataset==datasetName) %>%
+    arrange(desc(normMI)) %>%
+    select(l1, l2, MI = normMI) %>%
+    head(10) %>%
+    knitr::kable()
+}
+
+showTop10MI("VOC")
+```
+
+
+# Top 10 MI (COCO)
+
+```{r}
+showTop10MI("COCO")
+```
+
+# Top 10 MI (Restricted VG)
+
+```{r}
+showTop10MI("Restricted")
+```
+
+# Top labels ordered by MMI
+
+```{r, fig.width=10, fig.height=6}
+inverseMiData <- miData %>%
+  mutate(l_back = l1, l1 = l2) %>%
+  mutate(l2 = l_back) %>%
+  select(l1, l2, normMI, dataset)
+
+directMiData <- miData %>%
+  select(l1, l2, normMI, dataset)
+
+dualMiData <- rbind(directMiData, inverseMiData) %>%
+  group_by(l1, dataset) %>%
+  summarise(mmi = mean(normMI)) %>%
+  arrange(desc(mmi)) %>%
+  ungroup() %>%
+  group_by(dataset) %>%
+  mutate(i = row_number()) %>%
+  filter(i < 100)
+  
+dualMiData %>%
+  ggplot(aes(x=i, y=mmi, color=dataset)) +
+    geom_line() +
+    geom_point(alpha=0.7, shape=4) +
+    scale_x_log10()
+```
+
 
 # LDA Topic analysis: number of non-zero words per model
 
@@ -502,6 +565,25 @@ ldaModelData %>%
   knitr::kable()
 ```
 
+# LDA Topic Analysis: VOC Examples LDA_150_2 (6)
+
+```{r, out.width="35%"}
+baseVOCPathEx <- '/home/dani/Documentos/Proyectos/Doctorado/Datasets/VOCOPD/models/LDA_1000C'
+modelEx <- 'LDA_150_2'
+
+getVOCEx <- function(folder, number) {
+  paste(baseVOCPathEx, modelEx, 'examples_201911061304', folder, number, sep='/')
+}
+
+examples <- c(getVOCEx('6', 'ex_0-6.jpg'),
+              getVOCEx('6', 'ex_18-6.jpg'),
+              getVOCEx('6', 'ex_82-6.jpg'),
+              getVOCEx('6', 'ex_98-6.jpg')
+              )
+ 
+knitr::include_graphics(examples)
+```
+
 # LDA Topic Analysis: COCO
 
 ```{r}
@@ -512,6 +594,25 @@ ldaModelData %>%
   knitr::kable()
 ```
 
+
+# LDA Topic Analysis: COCO Examples LDA_25_2 (10)
+
+```{r, out.width="35%"}
+baseCOCOPathEx <- '/home/dani/Documentos/Proyectos/Doctorado/Datasets/COCOOPD/models/LDA_1000C'
+modelEx <- 'LDA_25_2'
+
+getCocoEx <- function(folder, number) {
+  paste(baseCOCOPathEx, modelEx, 'examples_201911061154', folder, number, sep='/')
+}
+
+examples <- c(getCocoEx('10', 'ex_17-10_15_0_1_2_3_4_5_6_7_8_9_11_12_13_14_16_17_18_19_20_21_22_23_24.jpg'),
+              getCocoEx('10', 'ex_62-10_4_15.jpg'),
+              getCocoEx('10', 'ex_234-10_17_0_1_2_3_4_5_6_7_8_9_11_12_13_14_15_16_18_19_20_21_22_23_24.jpg'),
+              getCocoEx('10', 'ex_588-10_15_0_1_2_3_4_5_6_7_8_9_11_12_13_14_16_17_18_19_20_21_22_23_24.jpg')
+              )
+ 
+knitr::include_graphics(examples)
+```
 
 
 # LDA Topic Analysis: Visual Genome
