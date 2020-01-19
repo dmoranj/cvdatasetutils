@@ -23,11 +23,13 @@ vocDataPath <- './analytics/voc_df.csv'
 vgDataPath <- './analytics/vg_df.csv'
 cocoDataPath <- './analytics/coco_df.csv'
 restrictedDataPath <- './analytics/restricted_df.csv'
+ad20kDataPath <- './analytics/ad20k_df.csv'
 
 vocData <- read.csv(vocDataPath)
 vgData <- read.csv(vgDataPath)
 cocoData <- read.csv(cocoDataPath)
 restrictedData <- read.csv(restrictedDataPath)
+ad20kData <- read.csv(ad20kDataPath)
 ```
 
 ```{r, include=FALSE}
@@ -47,7 +49,12 @@ cocoFragment <- cocoData %>%
   select(imageId = image_id, x, y, w, h, label = name ) %>%
   mutate(dataset = "COCO", imageId=as.character(imageId), x = x + w/2, y = y + h/2)
 
-globalData <- rbind(vocFragment, vgFragment, cocoFragment, restrictedFragment) %>%
+ad20kFragment <- ad20kData %>%
+  mutate(x = x / imgWidth, y = y/imgHeight, h = h/imgHeight, w = w/imgWidth) %>%
+  select(imageId = image_id, x, y, w, h, label ) %>%
+  mutate(dataset = "AD20K", imageId=as.character(imageId), x = x + w/2, y = y + h/2)
+
+globalData <- rbind(vocFragment, vgFragment, cocoFragment, restrictedFragment, ad20kFragment) %>%
   mutate(imageId = as.factor(imageId), dataset=as.factor(dataset), label=as.factor(label))
 
 ```
@@ -259,7 +266,65 @@ instancesPerLabel %>%
     scale_x_log10()
 ```
 
-# Same as before as a percentage of the total images in the dataset (i.e.: normalized)
+# Label Analisys (Histogram)
+
+```{r}
+getSimilarities <- function(inputPath, fileName) {
+  sampledPath <- paste(inputPath, paste('sampled', fileName, sep='_'), sep='/')
+  
+  sampledSimilarities <- NULL
+  
+  if (file.exists(sampledPath)) {
+      sampledSimilarities <- read.csv(sampledPath)
+  } else {
+      similarities <- read.csv(paste(inputPath, fileName, sep='/'))
+      sampledSimilarities <- sample_n(similarities, 1e5)
+      write.csv(sampledSimilarities, sampledPath)
+  }
+  
+  sampledSimilarities
+}
+
+ad20kSampleSimilarities <- getSimilarities('./analytics/', 'ad20k_similarities.csv')
+
+```
+
+```{r}
+ad20kSampleSimilarities %>%
+  arrange(desc(similarity)) %>%
+  mutate(id = row_number()) %>%
+  filter(similarity > 1e-3) %>%
+  ggplot(aes(similarity)) +
+    geom_histogram(binwidth = 0.05, fill='green', alpha=0.4, color='black')
+```
+
+# Label analysis [0.4, 0.5]
+
+```{r}
+similarityTable <- function(interv) {
+  ad20kSampleSimilarities %>%
+    arrange(desc(similarity)) %>%
+    mutate(id = row_number()) %>%
+    filter(similarity > interv, similarity < interv + 0.1) %>%
+    sample_n(10) %>%
+    select(label1, label2, similarity) %>%
+    knitr::kable()
+}
+
+similarityTable(0.4)
+```
+
+# Label analysis [0.6, 0.7]
+
+```{r}
+similarityTable(0.6)
+```
+
+# Label analysis [0.8, 0.9]
+
+```{r}
+similarityTable(0.8)
+```
 
 
 # Top 10 labels (VOC)
@@ -294,10 +359,16 @@ knitr::kable(filter(top10, dataset=="VG"))
 knitr::kable(filter(top10, dataset=="Restricted"))
 ```
 
+# Top 10 labels (AD20K)
+
+```{r}
+knitr::kable(filter(top10, dataset=="AD20K"))
+```
+
 # Conditional independence analysis (I)
 
 ```{r}
-getObjectAdjacency <- function(data, dsName) {
+getObjectAdjacency <- function(data, dsName, samples=NULL) {
   bnFileName <- paste('./analytics/', dsName, 'BN.csv', sep="_")
   
   if (file.exists(bnFileName)) {
@@ -307,7 +378,11 @@ getObjectAdjacency <- function(data, dsName) {
       filter(dataset == dsName) %>%
       select(imageId) %>%
       distinct()
-      
+    
+    if (!is.null(samples)) {
+      sampledIds <- sample_n(sampledIds, samples)
+    }
+    
     bnDf <- data %>%
       filter(dataset == dsName) %>%
       semi_join(sampledIds, by='imageId') %>%
@@ -320,7 +395,7 @@ getObjectAdjacency <- function(data, dsName) {
       select(-imageId)
     
     bnDf <- as.data.frame(lapply(bnDf, as.factor))
-    write.csv(labelTuples, bnFileName)
+    write.csv(bnDf, bnFileName)
   }
 
   bnDf
@@ -329,6 +404,7 @@ getObjectAdjacency <- function(data, dsName) {
 bnCoco <- getObjectAdjacency(globalData, "COCO")
 bnVOC <- getObjectAdjacency(globalData, "VOC")
 bnRestricted <- getObjectAdjacency(globalData, "Restricted")
+bnAD20k <- getObjectAdjacency(globalData, "AD20K", 3000)
 ```
 
 ```{r}
@@ -343,10 +419,10 @@ createMIComputer <- function(dataset) {
   }  
 } 
 
-computeMi <- function(dsName, ds, samples=NULL) {
+computeMi <- function(dsName, ds, samples=NULL, force=FALSE) {
   miFileName <- paste('./analytics/', dsName, 'MI.csv', sep="_")
   
-  if (file.exists(miFileName)) {
+  if (file.exists(miFileName) && !force) {
     labelTuples <- read.csv(miFileName)
   } else {
     labels <- colnames(ds)
@@ -362,6 +438,7 @@ computeMi <- function(dsName, ds, samples=NULL) {
   
     labelTuples$mi <- mapply(cocoComputer, str_replace(labelTuples$l1, " ", "."), str_replace(labelTuples$l2, " ", "."))
     write.csv(labelTuples, miFileName)
+    labelTuples$X <- 1:nrow(labelTuples)
   }
   
   labelTuples$dataset <- dsName
@@ -375,8 +452,9 @@ computeMi <- function(dsName, ds, samples=NULL) {
 miCoco <- computeMi("COCO", bnCoco)
 miVOC <- computeMi("VOC", bnVOC)
 miRestricted <- computeMi("Restricted", bnRestricted, 10000)
+miAD20k <- computeMi("AD20K", bnAD20k, 5000)
 
-miData <- rbind(miCoco, miVOC, miRestricted)
+miData <- rbind(miCoco, miVOC, miRestricted, miAD20k)
 ```
 
 ```{r, fig.width=10}
@@ -422,6 +500,13 @@ showTop10MI("COCO")
 
 ```{r}
 showTop10MI("Restricted")
+```
+
+
+# Top 10 MI (AD20k)
+
+```{r}
+showTop10MI("AD20K")
 ```
 
 # Top labels ordered by MMI
@@ -483,10 +568,13 @@ COCOOPDData$dataset <- "COCO"
 VGOPDData <- loadLdaTopics('/home/dani/Documentos/Proyectos/Doctorado/Datasets/VGOPD/models/LDA_1000C')
 VGOPDData$dataset <- "VG"
 
+Ad20kOPDData <- loadLdaTopics('/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20KOPD/models/LDA_1000C')
+Ad20kOPDData$dataset <- "AD20K"
+
 RestrictedOPDData <- loadLdaTopics('/home/dani/Documentos/Proyectos/Doctorado/Datasets/RestrictedOPD/models/LDA_1000C')
 RestrictedOPDData$dataset <- "Restricted"
 
-opdData <- rbind(VOCOPDData, COCOOPDData, VGOPDData, RestrictedOPDData)
+opdData <- rbind(VOCOPDData, COCOOPDData, VGOPDData, RestrictedOPDData, Ad20kOPDData)
 ```
 
 ```{r, dpi=72, fig.width=12, fig.height=8}
@@ -551,18 +639,24 @@ ldaModelData <- opdData %>%
   summarize(words = paste(object, collapse=", "), prob=paste(p, collapse=", ")) %>%
   ungroup() %>%
   select(dataset, model, key, words, prob) %>%
-  gather(attribute, values, -key, -model, -dataset) %>%
-  arrange(dataset, model, key)
+  gather(attribute, values, -key, -model, -dataset) 
 
 ```
 
 
 ```{r}
+modelIds <- ldaModelData %>%
+  filter(dataset == 'VOC') %>%
+  group_by(dataset, model, key) %>%
+  summarize(n = n()) %>%
+  ungroup() %>%
+  sample_n(5)
+
+
 ldaModelData %>%
-  filter(dataset == 'VOC')  %>%
+  semi_join(modelIds, by=c('dataset', 'model', 'key')) %>%
   select(model, key, values) %>%
-  head(10) %>%
-  knitr::kable()
+  knitr::kable() 
 ```
 
 # LDA Topic Analysis: VOC Examples LDA_150_2 (6)
@@ -587,11 +681,18 @@ knitr::include_graphics(examples)
 # LDA Topic Analysis: COCO
 
 ```{r}
-ldaModelData %>%
+modelIds <- ldaModelData %>%
   filter(dataset == 'COCO') %>%
-  select(model, key, values)  %>%
-  head(10) %>%
-  knitr::kable()
+  group_by(dataset, model, key) %>%
+  summarize(n = n()) %>%
+  ungroup() %>%
+  sample_n(5)
+
+
+ldaModelData %>%
+  semi_join(modelIds, by=c('dataset', 'model', 'key')) %>%
+  select(model, key, values) %>%
+  knitr::kable() 
 ```
 
 
@@ -618,21 +719,35 @@ knitr::include_graphics(examples)
 # LDA Topic Analysis: Visual Genome
 
 ```{r}
+modelIds <- ldaModelData %>%
+  filter(dataset == 'VG') %>%
+  group_by(dataset, model, key) %>%
+  summarize(n = n()) %>%
+  ungroup() %>%
+  sample_n(5)
+
+
 ldaModelData %>%
-  filter(dataset == 'VG')  %>%
+  semi_join(modelIds, by=c('dataset', 'model', 'key')) %>%
   select(model, key, values) %>%
-  head(10) %>%
-  knitr::kable()
+  knitr::kable() 
 ```
 
 # LDA Topic Analysis: Restricted Visual Genome
 
 ```{r}
+modelIds <- ldaModelData %>%
+  filter(dataset == 'Restricted') %>%
+  group_by(dataset, model, key) %>%
+  summarize(n = n()) %>%
+  ungroup() %>%
+  sample_n(5)
+
+
 ldaModelData %>%
-  filter(dataset == 'Restricted')  %>%
+  semi_join(modelIds, by=c('dataset', 'model', 'key')) %>%
   select(model, key, values) %>%
-  head(10) %>%
-  knitr::kable()
+  knitr::kable() 
 ```
 
 # LDA Topic Analysis: Restricted VG Examples LDA_100_16 (3)
@@ -668,6 +783,61 @@ examples <- c(getRestrictedEx('9', 'ex_2-9_34_16_24_71_3_84_59_4_45.jpg'),
               getRestrictedEx('9', 'ex_113-9_71_16_17_34_7_52_3_84_24_31_85_66.jpg'),
               getRestrictedEx('9', 'ex_123-9_3_36_34_71_95_76_1_68_24_21_67_79_72_50_31_11_64_12.jpg'),
               getRestrictedEx('9', 'ex_512-9_44_57_17_34_70_58_47_82_76_37.jpg')
+              )
+ 
+knitr::include_graphics(examples)
+```
+
+# LDA Topic Analysis: AD20K
+
+```{r}
+modelIds <- ldaModelData %>%
+  filter(dataset == 'AD20K') %>%
+  group_by(dataset, model, key) %>%
+  summarize(n = n()) %>%
+  ungroup() %>%
+  sample_n(5)
+
+
+ldaModelData %>%
+  semi_join(modelIds, by=c('dataset', 'model', 'key')) %>%
+  select(model, key, values) %>%
+  knitr::kable()  
+```
+
+# LDA Topic Analysis: AD20k LDA_25_8 (1)
+
+```{r, out.width="35%"}
+baseRestrictedPathEx <- '/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20KOPD/models/LDA_1000C'
+modelEx <- 'LDA_25_8'
+
+getRestrictedEx <- function(folder, number) {
+  paste(baseRestrictedPathEx, modelEx, 'examples', folder, number, sep='/')
+}
+
+examples <- c(getRestrictedEx('1', 'ex_14-1_23_11.jpg'),
+              getRestrictedEx('1', 'ex_96-1_23.jpg'),
+              getRestrictedEx('1', 'ex_192-1_23_22_20_5_10_6.jpg'),
+              getRestrictedEx('1', 'ex_265-1_23_5_7_0_24.jpg')
+              )
+ 
+knitr::include_graphics(examples)
+```
+
+# LDA Topic Analysis: AD20k LDA_25_8 (9)
+
+```{r, out.width="35%"}
+baseRestrictedPathEx <- '/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20KOPD/models/LDA_1000C'
+modelEx <- 'LDA_25_8'
+
+getRestrictedEx <- function(folder, number) {
+  paste(baseRestrictedPathEx, modelEx, 'examples', folder, number, sep='/')
+}
+
+examples <- c(getRestrictedEx('9', 'ex_37-9_21_3_6_2_22.jpg'),
+              getRestrictedEx('9', 'ex_121-9_10_21_6_8.jpg'),
+              getRestrictedEx('9', 'ex_228-9_6_2.jpg'),
+              getRestrictedEx('9', 'ex_273-9.jpg')
               )
  
 knitr::include_graphics(examples)

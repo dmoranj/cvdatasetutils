@@ -66,8 +66,8 @@ class VGOPD(Dataset):
             img_id = self.images.iloc[safe_idx, 1]
             img_name = self.create_img_name(img_id)
 
-        image = io.imread(img_name
-)
+        image = io.imread(img_name)
+
         if len(image.shape) != 3:
             image = np.stack((image,)*3, axis=-1)
 

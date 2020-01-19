@@ -1,0 +1,76 @@
+---
+title: "Metric Analysis"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+metricExperimentsPath <- './analytics/FRCNN_ad20k_evaluations.csv'
+metricExperimentsData <- read.csv(metricExperimentsPath)
+
+
+distancesExperimentsPath <- './images/semantic_similarity/distances.csv'
+distancesExperimentsData <- read.csv(distancesExperimentsPath) %>%
+  separate(path_to_ancestor, into=c('path_1', 'path_2'),sep='_') %>%
+  mutate(path_1=as.integer(path_1), path_2=as.integer(path_2), path_sum=path_1 + path_2) %>%
+  mutate(path_min = pmin(path_1, path_2), path_max=pmax(path_1, path_2))
+```
+
+# Metric candidate analysis
+
+## Wordnet similarities
+
+```{r, fig.width=12, fig.height=5}
+distancesExperimentsData %>%
+  select(X, path_min, path_max) %>%
+  gather(key, value, -X) %>%
+  ggplot(aes(x=value, fill = key)) +
+    facet_wrap(~ key, ncol=2) + 
+    geom_histogram(color='black', bins = 25)
+```
+
+
+
+## NLP similarities
+
+```{r, fig.width=12, fig.height=8}
+distancesExperimentsData %>%
+  select(X, nlp_cosine, wordnet_path, wordnet_wup) %>%
+  gather(key, value, -X) %>%
+  ggplot(aes(x=value, fill = key)) +
+    facet_wrap(~ key, ncol=2) + 
+    geom_histogram(color='black', bins = 25)
+```
+
+## Metrics (NLP)
+
+```{r}
+distancesExperimentsData %>%
+  select(l1, l2, nlp_cosine, wordnet_path, wordnet_wup) %>%
+  arrange(desc(nlp_cosine)) %>%
+  head(20) %>%
+  knitr::kable()
+```
+
+```{r}
+distancesExperimentsData %>%
+  select(l1, l2, wordnet_path, wordnet_wup) %>%
+  arrange(desc(wordnet_path)) %>%
+  head(20) %>%
+  knitr::kable()
+```
+
+
+
+# Metric Definitions
+
+
+
+# Metric experiments
+
+

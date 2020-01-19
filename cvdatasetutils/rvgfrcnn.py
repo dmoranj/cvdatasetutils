@@ -2,9 +2,10 @@ import os
 
 import cvdatasetutils.restrictedgenome as rvg
 from torch.utils.data import Dataset
-from skimage import io
 import torch
 from PIL import Image
+from cvdatasetutils.imageutils import show_objects_in_image
+import cvdatasetutils.transforms as T
 
 
 IMAGE_EXTENSION = ".jpg"
@@ -16,7 +17,6 @@ class RestrictedVgFasterRCNN(Dataset):
         self.ds.image_id = self.ds.image_id.apply(int).apply(str)
         self.images = self.ds.image_id.unique()
         self.image_folder = images_folder
-        self.ds.set_index('image_id', inplace=True, drop=False)
         self.labels = self.ds.sort_values(by='name').name.unique().tolist()
         self.transforms = transforms
 
@@ -25,7 +25,7 @@ class RestrictedVgFasterRCNN(Dataset):
 
     def __getitem__(self, idx):
         image_id = self.images[idx]
-        objects = self.ds.loc[image_id]
+        objects = self.ds.loc[self.ds.image_id == image_id]
 
         target = {
             'boxes': [],
@@ -64,14 +64,22 @@ class RestrictedVgFasterRCNN(Dataset):
         return img, target
 
 
-def test_ds():
+def test_ds(n):
     ds = RestrictedVgFasterRCNN('/home/dani/Documentos/Proyectos/Doctorado/Datasets/restrictedGenome',
-                                '/home/dani/Documentos/Proyectos/Doctorado/Datasets/vgtests/images')
+                                '/home/dani/Documentos/Proyectos/Doctorado/Datasets/vgtests/images',
+                                transforms=T.Compose([]))
 
-    for objects in ds:
-        print("Let's see")
+    num_examples = 0
+
+    for id, objects in enumerate(ds):
+        show_objects_in_image('../images/', objects, "{}".format(id), "RestrictedVG", ds.labels)
+
+        if num_examples < n:
+            num_examples += 1
+        else:
+            break
 
 
 if __name__== "__main__":
-    test_ds()
+    test_ds(50)
 
