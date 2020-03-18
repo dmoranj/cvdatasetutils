@@ -8,26 +8,47 @@ import cvdatasetutils.transforms as T
 from cvdatasetutils.imageutils import show_objects_in_image
 import spacy
 import pandas as pd
+import numpy as np
 
 
 IMAGE_EXTENSION = ".jpg"
 
 
+def create_object_masks(segmentation):
+    mask = np.array(segmentation)
+    _, _, B = np.swapaxes(mask, 0, 2)
+
+    obj_ids = np.unique(B)
+    obj_ids = obj_ids[1:]
+
+    mask_array = np.array([B == obj_id for obj_id in obj_ids]).astype(np.uint8)
+    return torch.tensor(np.swapaxes(mask_array, 1, 2))
+
+
 class AD20kFasterRCNN(Dataset):
-    def __init__(self, dataset_folder, images_folder, transforms, is_test=False, labels=None):
-        self.ds = ad20k.load_or_dataset(dataset_folder, is_test)
+    def __init__(self, dataset_folder, images_folder, transforms, is_test=False,
+                 labels=None, return_segmentation=False, max_size=None, half_precision=False):
+        self.ds = ad20k.load_or_dataset(dataset_folder, is_test, image_folder=images_folder)
         self.ds['image_name'] = self.ds['image_id']
         self.ds.drop(columns='image_id')
+
         self.image_folder = images_folder
 
         if labels is None:
-            self.labels = self.ds.sort_values(by='name').name.unique().tolist()
+            self.labels = ['unknown'] + self.ds[self.ds.name.ne('unknown')].sort_values(by='name').name.unique().tolist()
         else:
             self.labels = labels
 
         self.ds['image_id'] = self.ds.groupby('image_name').ngroup()
-        self.images = self.ds.image_id.unique()
+
+        if max_size is None:
+            self.images = self.ds.image_id.unique()
+        else:
+            self.images = np.random.choice(self.ds.image_id.unique(), max_size)
+
         self.transforms = transforms
+        self.return_segmentation = return_segmentation
+        self.half_precision = half_precision
 
     def __len__(self):
         return len(self.images)
@@ -45,8 +66,10 @@ class AD20kFasterRCNN(Dataset):
         }
 
         image_path = os.path.join(self.image_folder, objects.iloc[0]['image_name'])
+        segmentation_path = image_path.replace('.jpg', '_seg.png')
 
         image = Image.open(image_path).convert("RGB")
+        segmentation = Image.open(segmentation_path)
 
         for index, row in objects.iterrows():
             x = row['x']
@@ -59,6 +82,8 @@ class AD20kFasterRCNN(Dataset):
             target['area'].append(w * h)
             target['iscrowd'].append(False)
 
+        target['masks'] = create_object_masks(segmentation)
+
         target['boxes'] = torch.FloatTensor(target['boxes'])
         target['area'] = torch.tensor(target['area'])
         target['iscrowd'] = torch.tensor(target['iscrowd'], dtype=torch.int8)
@@ -68,21 +93,33 @@ class AD20kFasterRCNN(Dataset):
 
         img, target = self.transforms(image, target)
 
-        return img, target
+        if self.half_precision:
+            img = img.half()
+            new_target = {key: value.half() for key, value in target.items() if key != 'labels' and key != 'area'}
+            new_target["area"] = target["area"]
+            new_target["labels"] = target["labels"]
+            target = new_target
+
+        if self.return_segmentation:
+            segmentation = segmentation.convert("RGB")
+            seg = self.transforms(segmentation, target)
+            return img, target, seg
+        else:
+            return img, target
 
 
-def test_ds(n):
-    ds = AD20kFasterRCNN('/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K/ADE20K_2016_07_26/ade20ktrain.csv',
+def test_ds(n, path):
+    ds = AD20kFasterRCNN(os.path.join(path, 'ade20ktrain.csv'),
                          '/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K/ADE20K_2016_07_26/images/training',
-                         transforms=T.Compose([]))
+                         transforms=T.Compose([]), return_segmentation=True)
 
     num_examples = 0
 
-    for id, objects in enumerate(ds):
+    for img_id, objects in enumerate(ds):
         image = objects[0]
         ground_truth = objects[1]
 
-        show_objects_in_image('../images/', image, ground_truth, "{}".format(id), "ADE20K", ds.labels)
+        show_objects_in_image('../images/', image, ground_truth, "{}".format(img_id), "ADE20K", ds.labels)
 
         if num_examples < n:
             num_examples += 1
@@ -106,4 +143,4 @@ def nlp_test():
 
 
 if __name__== "__main__":
-    test_ds(5)
+    test_ds(5, '/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K/ADE20K_CLEAN')

@@ -1,10 +1,10 @@
 from PIL import Image
-import PIL
 import numpy as np
 import os
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-import torchvision.transforms as transforms
+import matplotlib.colors as mcolors
+import torch
 
 
 def get_intersection(obj1, obj2, pos, size):
@@ -53,12 +53,36 @@ def save_image(evaluation_path, image, name, title):
 
 
 def show_objects_in_image(evaluation_path, image, ground_truth, name, title, classes, colormap=None,
-                          predictions=None, prediction_classes=None):
+                          predictions=None, prediction_classes=None, segmentation_alpha=0.3):
+    """
+    Draw the objects and segmentation masks over the passed image (for separate images if containing the predictions)
+
+    :param evaluation_path:
+    :param image:
+    :param ground_truth:
+    :param name:
+    :param title:
+    :param classes:
+    :param colormap:
+    :param predictions:
+    :param prediction_classes:
+    :param segmentation_alpha:
+    :return:
+    """
+
+    draw_objects_in_image("ex_{}_{}_gt.png", evaluation_path, image, ground_truth, name, title, classes,
+                          colormap, segmentation_alpha)
+
+    if predictions is not None:
+        predictions['masks'] = predictions['masks'].squeeze()
+        draw_objects_in_image("ex_{}_{}_pred.png", evaluation_path, image, predictions, name, title,
+                              prediction_classes, colormap, segmentation_alpha, test=True)
+
+
+def draw_objects_in_image(img_name, evaluation_path, image, ground_truth, name, title,
+                          classes, colormap=None, segmentation_alpha=0.8, test=False):
 
     fig = plt.figure(frameon=False)
-
-    #if not isinstance(image, PIL.Image.Image):
-    #    image = transforms.ToPILImage()(image)
 
     plt.imshow(image, interpolation='nearest')
     ax = plt.Axes(fig, [0., 0., 1., 0.9])
@@ -66,28 +90,66 @@ def show_objects_in_image(evaluation_path, image, ground_truth, name, title, cla
     fig.add_axes(ax)
     plt.title(title)
 
-    draw_objects(ax, classes, ground_truth)
+    colors = [value for value in mcolors.TABLEAU_COLORS.values()]
+    draw_objects(ax, classes, ground_truth, colors)
 
-    if predictions is not None:
-        draw_objects(ax, prediction_classes, predictions, ground_truth=False)
+    if 'masks' in ground_truth.keys():
+        mask = generate_mask(ground_truth, colors, test)
+    else:
+        mask = None
 
     if colormap:
         ax.imshow(image, cmap=colormap)
+
+        if mask is not None:
+            ax.imshow(mask, cmap=colormap, alpha=segmentation_alpha)
     else:
         ax.imshow(image)
 
+        if mask is not None:
+            ax.imshow(mask, alpha=segmentation_alpha)
+
     ax.set_axis_off()
-    fig.savefig(os.path.join(evaluation_path, "ex_{}_{}.png".format(title, name)), dpi=120)
+    fig.savefig(os.path.join(evaluation_path, img_name.format(title, name)), dpi=120)
     plt.close(fig)
 
 
-def draw_objects(ax, classes, objects, ground_truth=True, threshold=0.3):
+def generate_mask(ground_truth, colors, test):
+
+    if test and ground_truth['labels'].shape == (1,):
+        masks = ground_truth['masks']
+        img_shape = masks.shape
+        mask = np.zeros((*img_shape, 3))
+        masks = [(masks > 0.5).int().detach().cpu().numpy()]
+    else:
+        masks = ground_truth['masks']
+        img_shape = masks[0].shape
+        mask = np.zeros((*img_shape, 3))
+        masks = masks.int()
+
+        if isinstance(masks, torch.Tensor):
+            masks = masks.detach().cpu().numpy()
+
+    for mask_id, obj_mask in enumerate(masks):
+        color = mcolors.to_rgb(colors[mask_id % len(colors)])
+
+        for color_index, color_value in enumerate(color):
+            try:
+                mask[:, :, color_index] += obj_mask * color_value
+            except:
+                print("Cua")
+
+    return mask
+
+
+def draw_objects(ax, classes, objects, colors, ground_truth=True, threshold=0.3):
+
     for obj_id in range(len(objects['boxes'])):
         if ground_truth:
-            color = 'g'
+            color_line = 'g'
             position = 'top'
         else:
-            color = 'r'
+            color_line = 'r'
             position = 'bottom'
 
             if objects['scores'][obj_id] < threshold:
@@ -99,11 +161,12 @@ def draw_objects(ax, classes, objects, ground_truth=True, threshold=0.3):
         h = obj[3] - obj[1]
 
         box = patches.Rectangle((obj[0], obj[1]), w, h,
-                                linewidth=2, edgecolor=color, facecolor='none', alpha=0.3)
+                                linewidth=2, edgecolor=color_line, facecolor='none', alpha=0.3)
 
         ax.add_patch(box)
 
         ax.text(obj[0], obj[1], classes[label],
                 horizontalalignment='left',
                 verticalalignment=position,
-                bbox=dict(facecolor=color, alpha=0.3))
+                bbox=dict(facecolor=colors[obj_id % len(colors)], alpha=0.3))
+

@@ -10,3 +10,5 @@ vgtests/
 analytics/
 *.pt
 images/
+*.log
+

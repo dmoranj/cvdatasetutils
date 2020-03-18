@@ -6,8 +6,6 @@ import pandas as pd
 import os
 import cv2
 from sklearn.model_selection import train_test_split
-from spacy.lemmatizer import Lemmatizer
-from spacy.lang.en import LEMMA_INDEX, LEMMA_EXC, LEMMA_RULES
 import spacy
 from torch.utils.data import Dataset
 import matplotlib.pyplot as plt
@@ -16,7 +14,6 @@ from torchvision import transforms
 from torch.utils.data import DataLoader
 import numpy as np
 
-lemmatizer = Lemmatizer(LEMMA_INDEX, LEMMA_EXC, LEMMA_RULES)
 nlp = spacy.load('en_core_web_sm')
 
 

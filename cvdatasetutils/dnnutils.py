@@ -1,6 +1,7 @@
 import torchvision
 import torch.nn as nn
 import json
+import cvdatasetutils.transforms as T
 
 
 def load_json(path):
@@ -55,3 +56,13 @@ def freeze_layers(feature_extractor, finetune, finetune_skipping):
             param.requires_grad = finetune
 
         current += 1
+
+
+def get_transform(train):
+    transforms = []
+    transforms.append(T.ToTensor())
+
+    if train:
+        transforms.append(T.RandomHorizontalFlip(0.5))
+
+    return T.Compose(transforms)
