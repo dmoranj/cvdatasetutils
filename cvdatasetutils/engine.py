@@ -17,8 +17,8 @@ import utils
 
 
 def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, test=False,
-                    max_iters=9, max_oom_errors=5, error_delay=5, max_nan_errors=5,
-                    batch_accumulator=1, history_freq=3, half_precision=False):
+                    max_iters=1e10, max_oom_errors=5, error_delay=5, max_nan_errors=5,
+                    batch_accumulator=1, history_freq=25, half_precision=False):
     if test:
         model.train()
     else:
@@ -115,7 +115,6 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, te
                 elif 'illegal' in str(e) and oom_error < max_oom_errors:
                     print('Illegal memory access found, retrying anyway, and logging')
 
-                    clean_from_error(error_delay, model, oom_error)
                     log_error(e)
                     oom_error += 1
                 else:

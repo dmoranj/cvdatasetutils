@@ -283,7 +283,7 @@ METAPARAMETER_DEF = {
 
 
 def test_eval(metaparameter_number):
-    for mixed in [False, True]:
+    for mixed in [True, False]:
         metaparameters = generate_metaparameters(metaparameter_number, METAPARAMETER_DEF, static=False)
 
         for meta_id in range(len(metaparameters['alpha'])):
@@ -297,7 +297,7 @@ def test_eval(metaparameter_number):
 
 if __name__== "__main__":
     option = 1
-    torch.backends.cudnn.benchmark = False
+    #torch.backends.cudnn.benchmark = False
 
     if option == 1:
         test_eval(6)
