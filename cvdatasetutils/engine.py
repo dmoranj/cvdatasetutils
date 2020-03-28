@@ -10,15 +10,28 @@ import torch
 import time
 from apex import amp
 import torchvision.models.detection.mask_rcnn
+from py3nvml import py3nvml
 
 from coco_utils import get_coco_api_from_dataset
 from coco_eval import CocoEvaluator
 import utils
 
+import tracemalloc
+
+py3nvml.nvmlInit()
+
+def get_current_memory_consumption():
+    handle = py3nvml.nvmlDeviceGetHandleByIndex(int(torch.cuda.current_device()))
+    meminfo = py3nvml.nvmlDeviceGetMemoryInfo(handle)
+    current, peak = tracemalloc.get_traced_memory()
+    return [value/1024**2 for value in [meminfo.total, meminfo.used, meminfo.free]] + [current, peak]
+
 
 def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, test=False,
-                    max_iters=1e10, max_oom_errors=5, error_delay=5, max_nan_errors=5,
-                    batch_accumulator=1, history_freq=25, half_precision=False):
+                    max_iters=1e20, max_oom_errors=5, error_delay=5, max_nan_errors=5,
+                    batch_accumulator=1, history_freq=50, half_precision=False):
+    tracemalloc.start()
+
     if test:
         model.train()
     else:
@@ -74,34 +87,38 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, te
                     if lr_scheduler is not None:
                         lr_scheduler.step()
 
+            with torch.no_grad():
+                loss_dict_reduced = utils.reduce_dict(loss_dict)
+                loss_dict_reduced = {key: value.detach().cpu() for key, value in loss_dict_reduced.items()}
+                losses_reduced = sum(loss.double() for loss in loss_dict_reduced.values())
 
-            # reduce losses over all GPUs for logging purposes
-            loss_dict_reduced = utils.reduce_dict(loss_dict)
-            loss_dict_reduced = {key: value.detach().cpu() for key, value in loss_dict_reduced.items()}
-            losses_reduced = sum(loss.double() for loss in loss_dict_reduced.values())
+                loss_value = losses_reduced.item()
 
-            loss_value = losses_reduced.item()
+                if not math.isfinite(loss_value):
+                    if nan_error > max_nan_errors:
+                        print("Loss is {}, stopping training".format(loss_value))
+                        print(loss_dict_reduced)
+                        sys.exit(1)
+                    else:
+                        print("Nan error found. Waiting for stochasticity to work the miracle.")
+                        continue
 
-            if not math.isfinite(loss_value):
-                if nan_error > max_nan_errors:
-                    print("Loss is {}, stopping training".format(loss_value))
-                    print(loss_dict_reduced)
-                    sys.exit(1)
-                else:
-                    print("Nan error found. Waiting for stochasticity to work the miracle.")
-                    continue
+                metric_logger.update(loss=losses_reduced.detach(), **loss_dict_reduced)
+                metric_logger.update(lr=optimizer.param_groups[0]["lr"])
 
-            metric_logger.update(loss=losses_reduced.detach(), **loss_dict_reduced)
-            metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+                if counter % history_freq == 0:
+                    memory_values = get_current_memory_consumption()
 
-            if counter % history_freq == 0:
-                history.append([
-                    counter, loss_value, *[float(value.numpy()) for key, value in loss_dict_reduced.items()]
-                ])
+                    tracemalloc.stop()
+                    tracemalloc.start()
 
-            oom_error = 0
+                    history.append([
+                        int(counter), float(loss_value), *[float(value.numpy()) for key, value in loss_dict_reduced.items()]
+                    ] + memory_values)
 
-            counter += 1
+                oom_error = 0
+
+                counter += 1
 
             if max_iters is not None and counter > max_iters:
                 break
@@ -120,6 +137,8 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, te
                 else:
                     print('| Couldnt recover from OOM error or similar', e)
                     raise e
+        finally:
+            tracemalloc.stop()
 
     return history
 

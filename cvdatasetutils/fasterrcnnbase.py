@@ -104,14 +104,14 @@ def save_model(output_path, model, name):
 
 def generate_datasets(batch_size, half_precision):
     dataset = AD20kFasterRCNN(
-        '/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K/ADE20K_CLEAN/ade20ktrain.csv',
-        '/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K/ADE20K_2016_07_26/images/training',
+        '/home/daniel/Documentos/Doctorado/Datasets/ADE20K/ADE20K_CLEAN/ade20ktrain.csv',
+        '/home/daniel/Documentos/Doctorado/Datasets/ADE20K/ADE20K_2016_07_26/images/training',
         transforms=get_transform(train=True),
         half_precision=half_precision)
 
     dataset_test = AD20kFasterRCNN(
-        '/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K/ADE20K_CLEAN/ade20ktest.csv',
-        '/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K/ADE20K_2016_07_26/images/validation',
+        '/home/daniel/Documentos/Doctorado/Datasets/ADE20K/ADE20K_CLEAN/ade20ktest.csv',
+        '/home/daniel/Documentos/Doctorado/Datasets/ADE20K/ADE20K_2016_07_26/images/validation',
         transforms=get_transform(train=False),
         is_test=True,
         max_size=10,
@@ -121,10 +121,10 @@ def generate_datasets(batch_size, half_precision):
     num_classes = len(dataset.labels)
 
     data_loader = torch.utils.data.DataLoader(
-        dataset, batch_size=batch_size, shuffle=True, num_workers=6,
+        dataset, batch_size=batch_size, shuffle=True, num_workers=4,
         collate_fn=utils.collate_fn)
     data_loader_test = torch.utils.data.DataLoader(
-        dataset_test, batch_size=batch_size, shuffle=False, num_workers=6,
+        dataset_test, batch_size=batch_size, shuffle=False, num_workers=4,
         collate_fn=utils.collate_fn)
 
     return data_loader, data_loader_test, num_classes
@@ -156,7 +156,8 @@ def write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, mix
 
     raw_df = pd.DataFrame(data, columns=[
         "epoch", "dataset", "model_id", "alpha", "batch_accumulator", "batch_size", "mixed", "time",
-        "batch_n", "loss", 'loss_classifier', 'loss_box_reg', 'loss_mask', 'loss_objectness', 'loss_rpn_box_reg'
+        "batch_n", "loss", 'loss_classifier', 'loss_box_reg', 'loss_mask', 'loss_objectness', 'loss_rpn_box_reg',
+        "gpu_total", "gpu_used", "gpu_free", "ram_current", "ram_peak"
     ])
 
     if os.path.exists(evaluation_path):
@@ -226,11 +227,11 @@ def test(input_path, dataset_path, output_path, n, mask_hidden_layers=256):
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
     dataset = AD20kFasterRCNN(os.path.join(dataset_path, 'ade20ktrain.csv'),
-                              '/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K/ADE20K_2016_07_26/images/training',
+                              '/home/daniel/Documentos/Doctorado/Datasets/ADE20K/ADE20K_2016_07_26/images/training',
                               transforms=get_transform(train=True))
 
     dataset_test = AD20kFasterRCNN(os.path.join(dataset_path, 'ade20ktest.csv'),
-                                   '/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K/ADE20K_2016_07_26/images/validation',
+                                   '/home/daniel/Documentos/Doctorado/Datasets/ADE20K/ADE20K_2016_07_26/images/validation',
                                    transforms=get_transform(train=False),
                                    labels=dataset.labels,
                                    is_test=True)
@@ -291,7 +292,7 @@ def test_eval(metaparameter_number):
             alpha = metaparameters['alpha'][meta_id]
             hidden = metaparameters['hidden'][meta_id]
 
-            execute_experiment(batch_size=2, alpha=alpha, num_epochs=3, mask_hidden=hidden,
+            execute_experiment(batch_size=2, alpha=alpha, num_epochs=5, mask_hidden=hidden,
                                half_precision=mixed, batch_accumulator=accumulator)
 
 
@@ -303,5 +304,5 @@ if __name__== "__main__":
         test_eval(6)
     else:
         test('./models/MaskRCNN_202003171107.pt',
-             '/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K/ADE20K_CLEAN',
+             '/home/daniel/Documentos/Doctorado/Datasets/ADE20K/ADE20K_CLEAN',
              '../images', 5, mask_hidden_layers=994)

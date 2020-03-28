@@ -56,42 +56,16 @@ class AD20kFasterRCNN(Dataset):
     def __getitem__(self, idx):
         image_id = self.images[idx]
         objects = self.ds.loc[self.ds.image_id == image_id]
-
-        target = {
-            'boxes': [],
-            'labels': [],
-            'image_id': torch.tensor([int(image_id)], dtype=torch.int64),
-            'area': [],
-            'iscrowd': []
-        }
-
         image_path = os.path.join(self.image_folder, objects.iloc[0]['image_name'])
         segmentation_path = image_path.replace('.jpg', '_seg.png')
 
         image = Image.open(image_path).convert("RGB")
         segmentation = Image.open(segmentation_path)
 
-        for index, row in objects.iterrows():
-            x = row['x']
-            y = row['y']
-            w = row['w']
-            h = row['h']
+        target = self.extract_target(objects, segmentation, image_id)
 
-            target['boxes'].append([x, y, x + w, y + h])
-            target['labels'].append(row['name'])
-            target['area'].append(w * h)
-            target['iscrowd'].append(False)
-
-        target['masks'] = create_object_masks(segmentation)
-
-        target['boxes'] = torch.FloatTensor(target['boxes'])
-        target['area'] = torch.tensor(target['area'])
-        target['iscrowd'] = torch.tensor(target['iscrowd'], dtype=torch.int8)
-
-        target['labels'] = [self.labels.index(id) if id in self.labels else 0 for id in target['labels']]
-        target['labels'] = torch.tensor(target['labels'], dtype=torch.int64)
-
-        img, target = self.transforms(image, target)
+        with torch.no_grad():
+            img, target = self.transforms(image, target)
 
         if self.half_precision:
             img = img.half()
@@ -106,6 +80,35 @@ class AD20kFasterRCNN(Dataset):
             return img, target, seg
         else:
             return img, target
+
+    def extract_target(self, objects, segmentation, image_id):
+        with torch.no_grad():
+            target = {
+                'boxes': [],
+                'labels': [],
+                'image_id': torch.tensor([int(image_id)], dtype=torch.int64),
+                'area': [],
+                'iscrowd': []
+            }
+
+            for index, row in objects.iterrows():
+                x = row['x']
+                y = row['y']
+                w = row['w']
+                h = row['h']
+
+                target['boxes'].append([x, y, x + w, y + h])
+                target['labels'].append(row['name'])
+                target['area'].append(w * h)
+                target['iscrowd'].append(False)
+            target['masks'] = create_object_masks(segmentation)
+            target['boxes'] = torch.FloatTensor(target['boxes'])
+            target['area'] = torch.tensor(target['area'])
+            target['iscrowd'] = torch.tensor(target['iscrowd'], dtype=torch.int8)
+            target['labels'] = [self.labels.index(id) if id in self.labels else 0 for id in target['labels']]
+            target['labels'] = torch.tensor(target['labels'], dtype=torch.int64)
+
+        return target
 
 
 def test_ds(n, path):
