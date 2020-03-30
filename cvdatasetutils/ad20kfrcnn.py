@@ -2,6 +2,7 @@ import os
 
 import cvdatasetutils.ad20k as ad20k
 from torch.utils.data import Dataset
+import torchvision.transforms.functional as F
 import torch
 from PIL import Image
 import cvdatasetutils.transforms as T
@@ -14,7 +15,10 @@ import numpy as np
 IMAGE_EXTENSION = ".jpg"
 
 
-def create_object_masks(segmentation):
+def create_object_masks(segmentation, new_size):
+    if new_size is not None:
+        segmentation = F.resize(segmentation, new_size)
+
     mask = np.array(segmentation)
     _, _, B = np.swapaxes(mask, 0, 2)
 
@@ -26,12 +30,12 @@ def create_object_masks(segmentation):
 
 
 class AD20kFasterRCNN(Dataset):
-    def __init__(self, dataset_folder, images_folder, transforms, is_test=False,
+    def __init__(self, dataset_folder, images_folder, transforms, is_test=False, new_size=None,
                  labels=None, return_segmentation=False, max_size=None, half_precision=False):
         self.ds = ad20k.load_or_dataset(dataset_folder, is_test, image_folder=images_folder)
         self.ds['image_name'] = self.ds['image_id']
         self.ds.drop(columns='image_id')
-
+        self.new_size = new_size
         self.image_folder = images_folder
 
         if labels is None:
@@ -60,9 +64,14 @@ class AD20kFasterRCNN(Dataset):
         segmentation_path = image_path.replace('.jpg', '_seg.png')
 
         image = Image.open(image_path).convert("RGB")
+        previous_size = image.size
+
+        if self.new_size is not None:
+            image = F.resize(image, self.new_size)
+
         segmentation = Image.open(segmentation_path)
 
-        target = self.extract_target(objects, segmentation, image_id)
+        target = self.extract_target(objects, segmentation, image_id, previous_size, self.new_size)
 
         with torch.no_grad():
             img, target = self.transforms(image, target)
@@ -81,7 +90,7 @@ class AD20kFasterRCNN(Dataset):
         else:
             return img, target
 
-    def extract_target(self, objects, segmentation, image_id):
+    def extract_target(self, objects, segmentation, image_id, previous_size, new_size):
         with torch.no_grad():
             target = {
                 'boxes': [],
@@ -101,9 +110,18 @@ class AD20kFasterRCNN(Dataset):
                 target['labels'].append(row['name'])
                 target['area'].append(w * h)
                 target['iscrowd'].append(False)
-            target['masks'] = create_object_masks(segmentation)
+
+            target['masks'] = create_object_masks(segmentation, new_size)
             target['boxes'] = torch.FloatTensor(target['boxes'])
             target['area'] = torch.tensor(target['area'])
+
+            if new_size is not None:
+                w_factor = new_size[0]/previous_size[0]
+                h_factor = new_size[1]/previous_size[1]
+                target['boxes'][:, [0, 2]] = target['boxes'][:, [0, 2]] * w_factor
+                target['boxes'][:, [1, 3]] = target['boxes'][:, [1, 3]] * h_factor
+                target['area'] = (target['area'] * w_factor * h_factor).round()
+
             target['iscrowd'] = torch.tensor(target['iscrowd'], dtype=torch.int8)
             target['labels'] = [self.labels.index(id) if id in self.labels else 0 for id in target['labels']]
             target['labels'] = torch.tensor(target['labels'], dtype=torch.int64)

@@ -12,3 +12,4 @@ analytics/
 images/
 *.log
 models/
+runs/

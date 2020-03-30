@@ -4,7 +4,7 @@ os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 from torchvision.models.detection.rpn import AnchorGenerator
 from torchvision.models.detection._utils import BoxCoder
 
-from cvdatasetutils.engine import train_one_epoch
+from cvdatasetutils.engine import train_one_epoch, evaluate
 import cvdatasetutils.utils as utils
 import torch
 import torchvision
@@ -19,6 +19,7 @@ import pandas as pd
 from apex import amp
 import time
 from mltrainingtools.metaparameters import generate_metaparameters
+from torch.utils.tensorboard import SummaryWriter
 
 
 class AnchorGeneratorHalfWrapper(AnchorGenerator):
@@ -45,7 +46,6 @@ class AnchorGeneratorHalfWrapper(AnchorGenerator):
 
     def __init__(self, anchor_sizes, aspect_ratios):
         super(AnchorGeneratorHalfWrapper, self).__init__(sizes=anchor_sizes, aspect_ratios=aspect_ratios)
-
 
 
 def create_anchor_wrapper():
@@ -102,21 +102,24 @@ def save_model(output_path, model, name):
     torch.save(model.state_dict(), os.path.join(output_path, name + '.pt'))
 
 
-def generate_datasets(batch_size, half_precision):
+def generate_datasets(dataset_base, batch_size, half_precision, new_size=(600, 600)):
     dataset = AD20kFasterRCNN(
-        '/home/daniel/Documentos/Doctorado/Datasets/ADE20K/ADE20K_CLEAN/ade20ktrain.csv',
-        '/home/daniel/Documentos/Doctorado/Datasets/ADE20K/ADE20K_2016_07_26/images/training',
+        os.path.join(dataset_base, 'ADE20K_CLEAN/ade20ktrain.csv'),
+        os.path.join(dataset_base, 'ADE20K_2016_07_26/images/training'),
         transforms=get_transform(train=True),
-        half_precision=half_precision)
+        half_precision=half_precision,
+        new_size=new_size
+    )
 
     dataset_test = AD20kFasterRCNN(
-        '/home/daniel/Documentos/Doctorado/Datasets/ADE20K/ADE20K_CLEAN/ade20ktest.csv',
-        '/home/daniel/Documentos/Doctorado/Datasets/ADE20K/ADE20K_2016_07_26/images/validation',
+        os.path.join(dataset_base, 'ADE20K_CLEAN/ade20ktest.csv'),
+        os.path.join(dataset_base, 'ADE20K_2016_07_26/images/validation'),
         transforms=get_transform(train=False),
         is_test=True,
         max_size=10,
         labels=dataset.labels,
-        half_precision=half_precision)
+        half_precision=half_precision,
+        new_size=new_size)
 
     num_classes = len(dataset.labels)
 
@@ -127,7 +130,7 @@ def generate_datasets(batch_size, half_precision):
         dataset_test, batch_size=batch_size, shuffle=False, num_workers=4,
         collate_fn=utils.collate_fn)
 
-    return data_loader, data_loader_test, num_classes
+    return data_loader, data_loader_test, dataset, dataset_test, num_classes
 
 
 def clean_tensor(t):
@@ -166,7 +169,7 @@ def write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, mix
         raw_df.to_csv(evaluation_path, mode='a')
 
 
-def execute_experiment(batch_size=1, alpha=0.003, num_epochs=20, mask_hidden=256,
+def execute_experiment(dataset_base, batch_size=1, alpha=0.003, num_epochs=20, mask_hidden=256,
                        half_precision=False, batch_accumulator=5):
     log = section_logger()
     sublog = section_logger(1)
@@ -177,10 +180,12 @@ def execute_experiment(batch_size=1, alpha=0.003, num_epochs=20, mask_hidden=256
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
     log('Generating datasets')
-    data_loader, data_loader_test, num_classes = generate_datasets(batch_size=batch_size, half_precision=half_precision)
+    data_loader, data_loader_test, dataset, dataset_test, num_classes = generate_datasets(dataset_base, batch_size=batch_size,
+                                                                   half_precision=half_precision)
 
     log('Generating segmentation model')
-    model = get_model_instance_segmentation(num_classes, device, mask_hidden_layer=mask_hidden, half_precision=half_precision)
+    model = get_model_instance_segmentation(num_classes, device, mask_hidden_layer=mask_hidden,
+                                            half_precision=half_precision)
 
     log('Create the optimizer')
     params = [p for p in model.parameters() if p.requires_grad]
@@ -195,15 +200,19 @@ def execute_experiment(batch_size=1, alpha=0.003, num_epochs=20, mask_hidden=256
 
     model_id = strftime("%Y%m%d%H%M", gmtime())
 
+    writer = SummaryWriter('runs/MaskRCNN')
+
     for epoch in range(num_epochs):
         sublog('Training epoch [{}]'.format(epoch))
         start = time.time()
-        results_train = train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq=10,
-                                        batch_accumulator=batch_accumulator, half_precision=half_precision)
+        results_train = train_one_epoch(model, optimizer, data_loader, lr_scheduler, writer, device, epoch,
+                                        print_freq=50, batch_accumulator=batch_accumulator,
+                                        half_precision=half_precision)
         end = time.time()
 
         sublog('Evaluating epoch [{}]'.format(epoch))
-        results_test = train_one_epoch(model, optimizer, data_loader_test, device, epoch, print_freq=10, test=True)
+        results_test = train_one_epoch(model, optimizer, data_loader_test, lr_scheduler, writer, device, epoch,
+                                       print_freq=50, batch_accumulator=batch_accumulator, test=True)
 
         sublog('Writing the results')
         write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, half_precision,
@@ -223,21 +232,8 @@ def load_frcnn(input_path, num_classes, device, mask_hidden_layers, eval=True):
     return model
 
 
-def test(input_path, dataset_path, output_path, n, mask_hidden_layers=256):
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-
-    dataset = AD20kFasterRCNN(os.path.join(dataset_path, 'ade20ktrain.csv'),
-                              '/home/daniel/Documentos/Doctorado/Datasets/ADE20K/ADE20K_2016_07_26/images/training',
-                              transforms=get_transform(train=True))
-
-    dataset_test = AD20kFasterRCNN(os.path.join(dataset_path, 'ade20ktest.csv'),
-                                   '/home/daniel/Documentos/Doctorado/Datasets/ADE20K/ADE20K_2016_07_26/images/validation',
-                                   transforms=get_transform(train=False),
-                                   labels=dataset.labels,
-                                   is_test=True)
-
-    num_classes = len(dataset.labels)
-    model = load_frcnn(input_path, num_classes, device, mask_hidden_layers)
+def test(input_path, dataset_base, output_path, n, mask_hidden_layers=256):
+    dataset, dataset_test, model, device, data_loader, data_loader_test = load_model_and_dataset(dataset_base, mask_hidden_layers, input_path)
 
     num_examples = 0
 
@@ -269,7 +265,7 @@ METAPARAMETER_DEF = {
     'accumulator':
         {
             'base': 5,
-            'range': 60,
+            'range': 10,
             'default': 50,
             'type': 'integer'
         },
@@ -283,7 +279,7 @@ METAPARAMETER_DEF = {
 }
 
 
-def test_eval(metaparameter_number):
+def metaparameter_experiments(metaparameter_number, dataset_base):
     for mixed in [True, False]:
         metaparameters = generate_metaparameters(metaparameter_number, METAPARAMETER_DEF, static=False)
 
@@ -292,17 +288,32 @@ def test_eval(metaparameter_number):
             alpha = metaparameters['alpha'][meta_id]
             hidden = metaparameters['hidden'][meta_id]
 
-            execute_experiment(batch_size=2, alpha=alpha, num_epochs=5, mask_hidden=hidden,
-                               half_precision=mixed, batch_accumulator=accumulator)
+            execute_experiment(dataset_base, batch_size=4, alpha=alpha,
+                               num_epochs=3, mask_hidden=hidden, half_precision=mixed, batch_accumulator=accumulator)
+
+
+def load_model_and_dataset(dataset_base, mask_hidden_layers, model_path, batch_size=2, half_precision=True):
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+
+    data_loader, data_loader_test, dataset, dataset_test, num_classes = generate_datasets(dataset_base,
+                                                                                          batch_size=batch_size,
+                                                                                          half_precision=half_precision)
+
+    model = load_frcnn(model_path, num_classes, device, mask_hidden_layers)
+
+    return dataset, dataset_test, model, device, data_loader, data_loader_test
 
 
 if __name__== "__main__":
     option = 1
     #torch.backends.cudnn.benchmark = False
+    dataset_base = "/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K"
 
     if option == 1:
-        test_eval(6)
+        metaparameter_experiments(6, dataset_base)
+    elif option == 2:
+        print("Pending...")
     else:
         test('./models/MaskRCNN_202003171107.pt',
-             '/home/daniel/Documentos/Doctorado/Datasets/ADE20K/ADE20K_CLEAN',
+             os.path.join(dataset_base, 'ADE20K_CLEAN'),
              '../images', 5, mask_hidden_layers=994)
