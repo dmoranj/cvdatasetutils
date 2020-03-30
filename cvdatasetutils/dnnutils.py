@@ -2,7 +2,7 @@ import torchvision
 import torch.nn as nn
 import json
 import cvdatasetutils.transforms as T
-
+from torchvision.transforms import Resize, ColorJitter
 
 def load_json(path):
     with open(path, "r") as f:

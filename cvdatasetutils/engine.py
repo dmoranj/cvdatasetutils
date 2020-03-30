@@ -5,7 +5,6 @@
 #########################################################################
 import math
 import sys
-import time
 import torch
 import time
 from apex import amp
@@ -18,6 +17,7 @@ import tracemalloc
 
 py3nvml.nvmlInit()
 
+
 def get_current_memory_consumption():
     handle = py3nvml.nvmlDeviceGetHandleByIndex(int(torch.cuda.current_device()))
     meminfo = py3nvml.nvmlDeviceGetMemoryInfo(handle)
@@ -25,9 +25,36 @@ def get_current_memory_consumption():
     return [value/1024**2 for value in [meminfo.total, meminfo.used, meminfo.free]] + [current, peak]
 
 
-def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, test=False,
-                    max_iters=1e20, max_oom_errors=5, error_delay=5, max_nan_errors=5,
-                    batch_accumulator=1, history_freq=50, half_precision=False):
+def register_evolution(counter, epoch, loss_value, loss_dict_reduced, data_loader, writer):
+    memory_values = get_current_memory_consumption()
+
+    tracemalloc.stop()
+    tracemalloc.start()
+
+    history_record = [int(counter), float(loss_value),
+                  *[float(value.numpy()) for key, value in loss_dict_reduced.items()]
+                  ] + memory_values
+
+    writer.add_scalar('training loss',
+                  history_record[1],
+                  epoch * len(data_loader) + counter)
+
+    writer.add_scalar('used_gpu',
+                  history_record[-4],
+                  epoch * len(data_loader) + counter)
+
+    writer.add_scalar('global_memory',
+                  history_record[-2],
+                  epoch * len(data_loader) + counter)
+
+    writer.close()
+
+    return history_record
+
+
+def train_one_epoch(model, optimizer, data_loader, lr_scheduler, writer, device, epoch, print_freq, test=False,
+                    max_iters=1e2, max_oom_errors=5, error_delay=5, max_nan_errors=5,
+                    batch_accumulator=1, history_freq=5, half_precision=False):
     tracemalloc.start()
 
     if test:
@@ -105,14 +132,10 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, te
                 metric_logger.update(lr=optimizer.param_groups[0]["lr"])
 
                 if counter % history_freq == 0:
-                    memory_values = get_current_memory_consumption()
+                    history_record = register_evolution(counter, epoch, loss_value, loss_dict_reduced,
+                                                        data_loader, writer)
 
-                    tracemalloc.stop()
-                    tracemalloc.start()
-
-                    history.append([
-                        int(counter), float(loss_value), *[float(value.numpy()) for key, value in loss_dict_reduced.items()]
-                    ] + memory_values)
+                    history.append(history_record)
 
                 oom_error = 0
 
