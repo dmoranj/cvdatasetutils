@@ -1,4 +1,3 @@
-from cvdatasetutils.engine import train_one_epoch, evaluate
 import cvdatasetutils.utils as utils
 import torch
 from cvdatasetutils.ad20kfrcnn import AD20kFasterRCNN
@@ -271,8 +270,6 @@ def regular_evaluation(input_path, output_path, n):
 
     num_classes = len(dataset.labels)
     model = load_frcnn(input_path, num_classes, device)
-
-    evaluate(model, data_loader_test, device=device)
 
 
 def get_tsne_results(predictions, tsne_embedding, labels, used_labels):

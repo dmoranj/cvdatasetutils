@@ -296,7 +296,7 @@ def test_eval(metaparameter_number):
                                half_precision=mixed, batch_accumulator=accumulator)
 
 
-if __name__== "__main__":
+def module_main():
     option = 1
     #torch.backends.cudnn.benchmark = False
 
@@ -306,3 +306,6 @@ if __name__== "__main__":
         test('./models/MaskRCNN_202003171107.pt',
              '/home/daniel/Documentos/Doctorado/Datasets/ADE20K/ADE20K_CLEAN',
              '../images', 5, mask_hidden_layers=994)
+
+if __name__== "__main__":
+    module_main()
