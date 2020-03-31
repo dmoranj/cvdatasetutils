@@ -4,7 +4,7 @@ os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 from torchvision.models.detection.rpn import AnchorGenerator
 from torchvision.models.detection._utils import BoxCoder
 
-from cvdatasetutils.engine import train_one_epoch, evaluate
+from cvdatasetutils.engine import train_one_epoch
 import cvdatasetutils.utils as utils
 import torch
 import torchvision
@@ -206,13 +206,13 @@ def execute_experiment(dataset_base, batch_size=1, alpha=0.003, num_epochs=20, m
         sublog('Training epoch [{}]'.format(epoch))
         start = time.time()
         results_train = train_one_epoch(model, optimizer, data_loader, lr_scheduler, writer, device, epoch,
-                                        print_freq=50, batch_accumulator=batch_accumulator,
+                                        print_freq=100, batch_accumulator=batch_accumulator,
                                         half_precision=half_precision)
         end = time.time()
 
         sublog('Evaluating epoch [{}]'.format(epoch))
         results_test = train_one_epoch(model, optimizer, data_loader_test, lr_scheduler, writer, device, epoch,
-                                       print_freq=50, batch_accumulator=batch_accumulator, test=True)
+                                       print_freq=100, batch_accumulator=batch_accumulator, test=True)
 
         sublog('Writing the results')
         write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, half_precision,
@@ -258,21 +258,21 @@ METAPARAMETER_DEF = {
     'hidden':
         {
             'base': 200,
-            'range': 800,
+            'range': 600,
             'default': 300,
             'type': 'integer'
         },
     'accumulator':
         {
-            'base': 5,
-            'range': 10,
+            'base': 2,
+            'range': 13,
             'default': 50,
             'type': 'integer'
         },
     'alpha':
         {
-            'base': 1.2,
-            'range': 2,
+            'base': 1.1,
+            'range': 2.5,
             'default': 1e-4,
             'type': 'smallfloat'
         }
@@ -288,7 +288,7 @@ def metaparameter_experiments(metaparameter_number, dataset_base):
             alpha = metaparameters['alpha'][meta_id]
             hidden = metaparameters['hidden'][meta_id]
 
-            execute_experiment(dataset_base, batch_size=4, alpha=alpha,
+            execute_experiment(dataset_base, batch_size=5, alpha=alpha,
                                num_epochs=3, mask_hidden=hidden, half_precision=mixed, batch_accumulator=accumulator)
 
 
@@ -307,7 +307,7 @@ def load_model_and_dataset(dataset_base, mask_hidden_layers, model_path, batch_s
 def module_main():
     option = 1
     #torch.backends.cudnn.benchmark = False
-    dataset_base = "/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K"
+    dataset_base = "/home/daniel/Documentos/Doctorado/Datasets/ADE20K"
 
     if option == 1:
         metaparameter_experiments(6, dataset_base)
