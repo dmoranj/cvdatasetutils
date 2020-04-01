@@ -138,7 +138,7 @@ def clean_tensor(t):
 
 
 def write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, mixed,
-                             results_test, results_train, epoch, time):
+                             results_test, results_train, epoch, time, mask_hidden):
     evaluation_path = './models/MaskRCNNAnalysis.csv'
 
     results = {
@@ -151,14 +151,14 @@ def write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, mix
     for dataset in ['train', 'test']:
         for batch_n, row in enumerate(results[dataset]):
             raw_values = [
-                epoch, dataset, model_id, alpha, batch_accumulator, batch_size, mixed, time,
+                epoch, dataset, model_id, alpha, batch_accumulator, batch_size, mixed, time, mask_hidden,
             ]
             raw_values += results[dataset][batch_n]
 
             data.append(raw_values)
 
     raw_df = pd.DataFrame(data, columns=[
-        "epoch", "dataset", "model_id", "alpha", "batch_accumulator", "batch_size", "mixed", "time",
+        "epoch", "dataset", "model_id", "alpha", "batch_accumulator", "batch_size", "mixed", "time", "mask_hidden",
         "batch_n", "loss", 'loss_classifier', 'loss_box_reg', 'loss_mask', 'loss_objectness', 'loss_rpn_box_reg',
         "gpu_total", "gpu_used", "gpu_free", "ram_current", "ram_peak"
     ])
@@ -216,7 +216,7 @@ def execute_experiment(dataset_base, batch_size=1, alpha=0.003, num_epochs=20, m
 
         sublog('Writing the results')
         write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, half_precision,
-                                 results_test, results_train, epoch, round(end - start))
+                                 results_test, results_train, epoch, round(end - start), mask_hidden)
 
         save_model('./models', model, "MaskRCNN_" + model_id)
 

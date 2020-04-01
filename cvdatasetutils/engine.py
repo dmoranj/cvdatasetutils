@@ -116,7 +116,7 @@ def train_one_epoch(model, optimizer, data_loader, lr_scheduler, writer, device,
 
             with torch.no_grad():
                 loss_dict_reduced = utils.reduce_dict(loss_dict)
-                loss_dict_reduced = {key: value.detach().cpu() for key, value in loss_dict_reduced.items()}
+                loss_dict_reduced = {key: value.detach().cpu()/batch_accumulator for key, value in loss_dict_reduced.items()}
                 losses_reduced = sum(loss.double() for loss in loss_dict_reduced.values())
 
                 loss_value = losses_reduced.item()
