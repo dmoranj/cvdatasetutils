@@ -157,6 +157,10 @@ def draw_objects(ax, classes, objects, colors, ground_truth=True, threshold=0.3)
 
         obj = objects['boxes'][obj_id]
         label = objects['labels'][obj_id]
+
+        if obj.dtype == torch.float16:
+            obj = obj.float()
+
         w = obj[2] - obj[0]
         h = obj[3] - obj[1]
 

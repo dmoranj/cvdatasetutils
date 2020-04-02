@@ -29,10 +29,18 @@ def create_object_masks(segmentation, new_size):
     return torch.tensor(np.swapaxes(mask_array, 1, 2))
 
 
+def filter_categories(ds, filtered_categories):
+    return ds[~ds['name'].isin(filtered_categories)]
+
+
 class AD20kFasterRCNN(Dataset):
     def __init__(self, dataset_folder, images_folder, transforms, is_test=False, new_size=None,
-                 labels=None, return_segmentation=False, max_size=None, half_precision=False):
+                 labels=None, return_segmentation=False, max_size=None, half_precision=False,
+                 filtered_categories=['wall', 'sky', 'road', 'floor', 'ceiling', 'earth', 'grass', 'sidewalk', 'road']):
+        
         self.ds = ad20k.load_or_dataset(dataset_folder, is_test, image_folder=images_folder)
+        self.ds = filter_categories(self.ds, filtered_categories)
+        
         self.ds['image_name'] = self.ds['image_id']
         self.ds.drop(columns='image_id')
         self.new_size = new_size

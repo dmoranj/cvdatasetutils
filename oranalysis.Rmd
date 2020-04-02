@@ -198,6 +198,29 @@ globalData %>%
     coord_flip()
 ```
 
+# Top 20 most frequent label distribution
+
+```{r, dpi=72, fig.width=12, fig.height=14}
+distributionSummaries <- globalData %>%
+  select(dataset, label, area) %>%
+  group_by(dataset, label) %>%
+  summarize(number=n()) %>%
+  arrange(desc(number)) %>%  
+  mutate(id=sequence(n())) %>%
+  mutate(rank = rank(desc(number))) %>%
+  filter(id <= 50)
+
+globalData %>%
+  select(dataset, label) %>%
+  group_by(dataset, label) %>%
+  filter(dataset=='AD20K') %>%
+  semi_join(distributionSummaries, by=c('dataset', 'label')) %>%
+  ggplot(aes(x=label, y=number)) +
+    geom_bar(stat='identity', alpha=0.6, fill='blue', color='black') +
+    facet_wrap(~ dataset, ncol=1, scales="free") +
+    theme(axis.text.x = element_text(angle = 45, hjust=1))
+```
+
 # Number of objects per image
 
 ```{r, dpi=72, fig.width=12, fig.height=4}

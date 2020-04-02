@@ -81,7 +81,7 @@ def get_model_instance_segmentation(num_classes, device, mask_hidden_layer, half
     in_features_mask = model.roi_heads.mask_predictor.conv5_mask.in_channels
     model.roi_heads.mask_predictor = MaskRCNNPredictor(in_features_mask, mask_hidden_layer, num_classes)
 
-    model.to(device)
+    model = model.to(device)
 
     if False:
         model.half()
@@ -200,7 +200,7 @@ def execute_experiment(dataset_base, batch_size=1, alpha=0.003, num_epochs=20, m
 
     model_id = strftime("%Y%m%d%H%M", gmtime())
 
-    writer = SummaryWriter('runs/MaskRCNN')
+    writer = SummaryWriter('runs/MaskRCNN_{}'.format(model_id))
 
     for epoch in range(num_epochs):
         sublog('Training epoch [{}]'.format(epoch))
@@ -221,19 +221,31 @@ def execute_experiment(dataset_base, batch_size=1, alpha=0.003, num_epochs=20, m
         save_model('./models', model, "MaskRCNN_" + model_id)
 
 
-def load_frcnn(input_path, num_classes, device, mask_hidden_layers, eval=True):
-    model = get_model_instance_segmentation(num_classes, device, mask_hidden_layer=mask_hidden_layers)
-    model.load_state_dict(torch.load(input_path))
+def load_frcnn(input_path, num_classes, device, mask_hidden_layers, eval=True, half_precision=True):
+    model_weights = torch.load(input_path)
+
+    if mask_hidden_layers is None:
+        mask_hidden_layers = model_weights['roi_heads.mask_predictor.conv5_mask.weight'].shape[1]
+
+    model = get_model_instance_segmentation(num_classes, device, mask_hidden_layer=mask_hidden_layers,
+                                            half_precision=half_precision)
+    model.load_state_dict(model_weights)
 
     if eval:
         model.eval()
 
-    model.to(device)
+    model = model.to(device)
     return model
 
 
-def test(input_path, dataset_base, output_path, n, mask_hidden_layers=256):
-    dataset, dataset_test, model, device, data_loader, data_loader_test = load_model_and_dataset(dataset_base, mask_hidden_layers, input_path)
+def test(input_path, dataset_base, output_path, n, half_precision=False):
+
+    dataset, dataset_test, model, device, data_loader, data_loader_test = load_model_and_dataset(dataset_base,
+                                                                                                 None,
+                                                                                                 input_path,
+                                                                                                 half_precision=half_precision)
+    if half_precision:
+        model = amp.initialize(model, opt_level='O1')
 
     num_examples = 0
 
@@ -288,7 +300,7 @@ def metaparameter_experiments(metaparameter_number, dataset_base):
             alpha = metaparameters['alpha'][meta_id]
             hidden = metaparameters['hidden'][meta_id]
 
-            execute_experiment(dataset_base, batch_size=4, alpha=alpha,
+            execute_experiment(dataset_base, batch_size=2, alpha=alpha,
                                num_epochs=3, mask_hidden=hidden, half_precision=mixed, batch_accumulator=accumulator)
 
 
@@ -299,14 +311,15 @@ def load_model_and_dataset(dataset_base, mask_hidden_layers, model_path, batch_s
                                                                                           batch_size=batch_size,
                                                                                           half_precision=half_precision)
 
-    model = load_frcnn(model_path, num_classes, device, mask_hidden_layers)
+    model = load_frcnn(model_path, num_classes, device, mask_hidden_layers, half_precision=half_precision)
 
     return dataset, dataset_test, model, device, data_loader, data_loader_test
 
 
 if __name__== "__main__":
-    option = 1
+    option = 2
     #torch.backends.cudnn.benchmark = False
+    #dataset_base = "/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K"
     dataset_base = "/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K"
 
     if option == 1:
@@ -314,6 +327,7 @@ if __name__== "__main__":
     elif option == 2:
         print("Pending...")
     else:
-        test('./models/MaskRCNN_202003171107.pt',
-             os.path.join(dataset_base, 'ADE20K_CLEAN'),
-             '../images', 5, mask_hidden_layers=994)
+        test('./models/MaskRCNN_202004012149.pt',
+             dataset_base,
+             '../images', 15,
+             half_precision=False)
