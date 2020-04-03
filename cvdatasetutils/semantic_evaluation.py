@@ -1,4 +1,3 @@
-from cvdatasetutils.engine import train_one_epoch, evaluate
 import cvdatasetutils.utils as utils
 import torch
 from cvdatasetutils.ad20kfrcnn import AD20kFasterRCNN
@@ -6,7 +5,7 @@ import os
 from time import gmtime, strftime
 
 from cvdatasetutils.fasterrcnnbase import load_frcnn
-from cvdatasetutils.imageutils import show_objects_in_image, IoU, save_image
+from cvdatasetutils.imageutils import show_objects_in_image, IoU, save_image, adjust_box
 import pandas as pd
 import spacy
 import numpy as np
@@ -20,15 +19,6 @@ from scipy.optimize import linear_sum_assignment
 from cvdatasetutils.dnnutils import get_transform
 
 
-
-def adjust_box(box, width=1, height=1):
-    adjusted_box = {}
-    adjusted_box['bx'] = box[0] / width
-    adjusted_box['by'] = box[1] / height
-    adjusted_box['w'] = (box[2] - box[0]) / width
-    adjusted_box['h'] = (box[3] - box[1]) / height
-
-    return adjusted_box
 
 
 def clean_stats_for_numpy(obj):
@@ -271,8 +261,6 @@ def regular_evaluation(input_path, output_path, n):
 
     num_classes = len(dataset.labels)
     model = load_frcnn(input_path, num_classes, device)
-
-    evaluate(model, data_loader_test, device=device)
 
 
 def get_tsne_results(predictions, tsne_embedding, labels, used_labels):

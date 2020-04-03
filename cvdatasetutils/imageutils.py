@@ -7,6 +7,16 @@ import matplotlib.colors as mcolors
 import torch
 
 
+def adjust_box(box, width=1, height=1):
+    adjusted_box = {}
+    adjusted_box['bx'] = box[0] / width
+    adjusted_box['by'] = box[1] / height
+    adjusted_box['w'] = (box[2] - box[0]) / width
+    adjusted_box['h'] = (box[3] - box[1]) / height
+
+    return adjusted_box
+
+
 def get_intersection(obj1, obj2, pos, size):
     order = lambda o1, o2, pos, size: (o1, o2) if o1[pos] - o1[size]/2 < o2[pos] - o2[size]/2 else (o2, o1)
 

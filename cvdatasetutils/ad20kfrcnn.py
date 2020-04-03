@@ -10,6 +10,7 @@ from cvdatasetutils.imageutils import show_objects_in_image
 import spacy
 import pandas as pd
 import numpy as np
+import random
 
 
 IMAGE_EXTENSION = ".jpg"
@@ -33,10 +34,22 @@ def filter_categories(ds, filtered_categories):
     return ds[~ds['name'].isin(filtered_categories)]
 
 
+def downsample(target, normalization_weights, labels):
+    keep_indexes = [index for index, value in enumerate(target['labels'])
+                    if value == 0 or random.random() < normalization_weights.loc[labels[value]]]
+
+    if len(keep_indexes) > 0:
+        for key in ['labels', 'boxes', 'area', 'iscrowd', 'masks']:
+            target[key] = target[key][keep_indexes]
+
+    return target
+
+
 class AD20kFasterRCNN(Dataset):
     def __init__(self, dataset_folder, images_folder, transforms, is_test=False, new_size=None,
                  labels=None, return_segmentation=False, max_size=None, half_precision=False,
-                 filtered_categories=['wall', 'sky', 'road', 'floor', 'ceiling', 'earth', 'grass', 'sidewalk', 'road']):
+                 filtered_categories=['wall', 'sky', 'road', 'floor', 'ceiling', 'earth', 'grass', 'sidewalk', 'road'],
+                 perc_normalization=0.3):
         
         self.ds = ad20k.load_or_dataset(dataset_folder, is_test, image_folder=images_folder)
         self.ds = filter_categories(self.ds, filtered_categories)
@@ -62,6 +75,13 @@ class AD20kFasterRCNN(Dataset):
         self.return_segmentation = return_segmentation
         self.half_precision = half_precision
 
+        if perc_normalization is not None:
+            label_count = self.ds.name.value_counts()
+            max_label = label_count.max()
+            self.normalization_weights = (1 - perc_normalization) + perc_normalization*(1 - label_count/max_label)
+        else:
+            self.normalization_weights = None
+
     def __len__(self):
         return len(self.images)
 
@@ -80,6 +100,9 @@ class AD20kFasterRCNN(Dataset):
         segmentation = Image.open(segmentation_path)
 
         target = self.extract_target(objects, segmentation, image_id, previous_size, self.new_size)
+
+        if self.normalization_weights is not None:
+            target = downsample(target, self.normalization_weights, self.labels)
 
         with torch.no_grad():
             img, target = self.transforms(image, target)

@@ -1,0 +1,76 @@
+---
+title: "MaskRCNN Analysis"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+```
+
+```{r}
+pathModelData <- './cvdatasetutils/models/MaskRCNNAnalysisTorre.csv'
+
+modelData <- read.csv(pathModelData)%>%
+  mutate(model_id=as.character(model_id))
+
+models <- unique(modelData$model_id)
+ids <- data.frame(model_id=models, id=1:length(models))
+
+modelData <- modelData %>%
+  inner_join(ids, by='model_id') %>%
+  filter(mixed == 'False')
+
+memData <- modelData %>%
+  select(id, model_id, epoch, batch_n, gpu_total, gpu_used, gpu_free) %>%
+  arrange(id, epoch, batch_n) %>%
+  group_by(id) %>%
+  mutate(step = row_number()) %>%
+  select(-epoch, -batch_n)
+
+lossData <- modelData %>%
+  select(id, model_id, epoch, batch_n, loss, loss_classifier, loss_objectness, loss_mask, loss_box_reg, loss_rpn_box_reg) %>%
+  arrange(id, epoch, batch_n) %>%
+  group_by(id) %>%
+  mutate(step = row_number()) %>%
+  select(-epoch, -batch_n)
+```
+
+```{r}
+modelData %>%
+  group_by(id) %>%
+  summarize(model_id=last(model_id), alpha=max(alpha), batch_size=last(batch_size), real_batch=last(batch_size)*last(batch_accumulator), 
+            mixed=last(mixed), maxTime=max(time/3600), minTime=min(time(3600)), minLoss=min(loss)/min(batch_accumulator), maxGpu=max(gpu_total)) %>%
+  arrange(minLoss)
+```
+
+```{r, fig.width=14, fig.height=12}
+globalLoss <- lossData %>%
+  select(id, loss, step) %>%
+  gather(lossType, value, -id, -step) %>%
+  mutate(lossType = as.factor(lossType))
+
+lossData %>%
+  select(-loss, -model_id) %>%
+  gather(lossType, value, -id, -step) %>%
+  mutate(lossType = as.factor(lossType)) %>%
+  ggplot(aes(x=step, y = value, color=lossType)) +
+    facet_wrap(~ id, ncol=3) +
+    geom_line(alpha=0.2) +
+    geom_smooth(method="loess") +
+    geom_smooth(data=globalLoss, method="loess")
+```
+
+
+```{r, fig.width=12, fig.height=15}
+memData %>%
+  gather(memType, value, -model_id, -step) %>%
+  mutate(memType = as.factor(memType)) %>%
+  ggplot(aes(x=step, y = value, color=memType)) +
+    facet_wrap(~ model_id, ncol=3) +
+    geom_line(alpha=0.2) +
+    geom_smooth(method="loess")
+```

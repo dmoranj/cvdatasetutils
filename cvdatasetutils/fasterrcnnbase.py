@@ -4,7 +4,7 @@ os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 from torchvision.models.detection.rpn import AnchorGenerator
 from torchvision.models.detection._utils import BoxCoder
 
-from cvdatasetutils.engine import train_one_epoch, evaluate
+from cvdatasetutils.engine import train_one_epoch
 import cvdatasetutils.utils as utils
 import torch
 import torchvision
@@ -20,6 +20,8 @@ from apex import amp
 import time
 from mltrainingtools.metaparameters import generate_metaparameters
 from torch.utils.tensorboard import SummaryWriter
+
+from cvdatasetutils.basicevaluation import evaluate_map, evaluate_masks
 
 
 class AnchorGeneratorHalfWrapper(AnchorGenerator):
@@ -138,7 +140,7 @@ def clean_tensor(t):
 
 
 def write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, mixed,
-                             results_test, results_train, epoch, time, mask_hidden):
+                             results_test, results_train, epoch, time, mask_hidden, map, mask):
     evaluation_path = './models/MaskRCNNAnalysis.csv'
 
     results = {
@@ -152,6 +154,7 @@ def write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, mix
         for batch_n, row in enumerate(results[dataset]):
             raw_values = [
                 epoch, dataset, model_id, alpha, batch_accumulator, batch_size, mixed, time, mask_hidden,
+                map, mask
             ]
             raw_values += results[dataset][batch_n]
 
@@ -159,6 +162,7 @@ def write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, mix
 
     raw_df = pd.DataFrame(data, columns=[
         "epoch", "dataset", "model_id", "alpha", "batch_accumulator", "batch_size", "mixed", "time", "mask_hidden",
+        "map", "mask",
         "batch_n", "loss", 'loss_classifier', 'loss_box_reg', 'loss_mask', 'loss_objectness', 'loss_rpn_box_reg',
         "gpu_total", "gpu_used", "gpu_free", "ram_current", "ram_peak"
     ])
@@ -170,7 +174,7 @@ def write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, mix
 
 
 def execute_experiment(dataset_base, batch_size=1, alpha=0.003, num_epochs=20, mask_hidden=256,
-                       half_precision=False, batch_accumulator=5):
+                       half_precision=False, batch_accumulator=5, max_examples_eval=5):
     log = section_logger()
     sublog = section_logger(1)
 
@@ -206,17 +210,22 @@ def execute_experiment(dataset_base, batch_size=1, alpha=0.003, num_epochs=20, m
         sublog('Training epoch [{}]'.format(epoch))
         start = time.time()
         results_train = train_one_epoch(model, optimizer, data_loader, lr_scheduler, writer, device, epoch,
-                                        print_freq=50, batch_accumulator=batch_accumulator,
+                                        print_freq=100, batch_accumulator=batch_accumulator,
                                         half_precision=half_precision)
         end = time.time()
 
-        sublog('Evaluating epoch [{}]'.format(epoch))
+        sublog('Evaluating epoch loss [{}]'.format(epoch))
         results_test = train_one_epoch(model, optimizer, data_loader_test, lr_scheduler, writer, device, epoch,
-                                       print_freq=50, batch_accumulator=batch_accumulator, test=True)
+                                       print_freq=100, batch_accumulator=batch_accumulator, test=True)
+
+
+        sublog('Evaluating epoch map [{}]'.format(epoch))
+        map, mask = compute_map(data_loader_test, device, model, max_examples_eval)
 
         sublog('Writing the results')
         write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, half_precision,
-                                 results_test, results_train, epoch, round(end - start), mask_hidden)
+                                 results_test, results_train, epoch, round(end - start), mask_hidden,
+                                 map, mask)
 
         save_model('./models', model, "MaskRCNN_" + model_id)
 
@@ -270,20 +279,20 @@ METAPARAMETER_DEF = {
     'hidden':
         {
             'base': 200,
-            'range': 800,
+            'range': 600,
             'default': 300,
             'type': 'integer'
         },
     'accumulator':
         {
-            'base': 5,
-            'range': 10,
+            'base': 2,
+            'range': 13,
             'default': 50,
             'type': 'integer'
         },
     'alpha':
         {
-            'base': 1.2,
+            'base': 1.1,
             'range': 2,
             'default': 1e-4,
             'type': 'smallfloat'
@@ -292,7 +301,7 @@ METAPARAMETER_DEF = {
 
 
 def metaparameter_experiments(metaparameter_number, dataset_base):
-    for mixed in [True, False]:
+    for mixed in [False]:
         metaparameters = generate_metaparameters(metaparameter_number, METAPARAMETER_DEF, static=False)
 
         for meta_id in range(len(metaparameters['alpha'])):
@@ -300,8 +309,8 @@ def metaparameter_experiments(metaparameter_number, dataset_base):
             alpha = metaparameters['alpha'][meta_id]
             hidden = metaparameters['hidden'][meta_id]
 
-            execute_experiment(dataset_base, batch_size=2, alpha=alpha,
-                               num_epochs=3, mask_hidden=hidden, half_precision=mixed, batch_accumulator=accumulator)
+            execute_experiment(dataset_base, batch_size=5, alpha=alpha,
+                               num_epochs=5, mask_hidden=hidden, half_precision=mixed, batch_accumulator=accumulator)
 
 
 def load_model_and_dataset(dataset_base, mask_hidden_layers, model_path, batch_size=2, half_precision=True):
@@ -316,18 +325,73 @@ def load_model_and_dataset(dataset_base, mask_hidden_layers, model_path, batch_s
     return dataset, dataset_test, model, device, data_loader, data_loader_test
 
 
-if __name__== "__main__":
-    option = 2
-    #torch.backends.cudnn.benchmark = False
-    #dataset_base = "/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K"
+def evaluate(input_path, dataset_base, n, half_precision=False):
+    log = section_logger()
+
+    log('Loading datasets')
+    dataset, dataset_test, model, device, data_loader, data_loader_test = load_model_and_dataset(dataset_base,
+                                                                                                 None,
+                                                                                                 input_path,
+                                                                                                 half_precision=half_precision)
+    if half_precision:
+        model = amp.initialize(model, opt_level='O1')
+
+    global_map, global_mask = compute_map(data_loader_test, device, model, n)
+
+    print('Train mAP={} and the MaskAP={}'.format(global_map, global_mask))
+
+    global_map, global_mask = compute_map(data_loader, device, model, n)
+    print('Test mAP={} and the MaskAP={}'.format(global_map, global_mask))
+
+
+def compute_map(data_loader, device, model, max_examples):
+    num_examples = 0
+    global_map = []
+    global_mask = []
+
+    model.eval()
+
+    for id, objects in enumerate(data_loader):
+        images = [image.to(device) for image in objects[0]]
+        predictions = model(images)
+
+        for image_id, ground_truth in enumerate(objects[1]):
+            _, width, height = images[image_id].shape
+
+            local_map, _ = evaluate_map(predictions[image_id], ground_truth, width, height)
+            local_mask_value, _ = evaluate_masks(predictions[image_id], ground_truth, width, height)
+
+            global_map.append(local_map)
+            global_mask.append(local_mask_value)
+
+        if num_examples > max_examples:
+            break
+        else:
+            num_examples += len(images)
+
+    global_map = sum(global_map) / num_examples
+    global_mask = sum(global_mask) / num_examples
+    return global_map, global_mask
+
+
+def module_main():
+    option = 1
     dataset_base = "/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K"
+    #dataset_base = "/home/daniel/Documentos/Doctorado/Datasets/ADE20K"
 
     if option == 1:
-        metaparameter_experiments(6, dataset_base)
+        metaparameter_experiments(10, dataset_base)
     elif option == 2:
-        print("Pending...")
+        evaluate('./models/MaskRCNN_202004012149.pt',
+                 dataset_base,
+                 5,
+                 half_precision=False)
     else:
         test('./models/MaskRCNN_202004012149.pt',
              dataset_base,
              '../images', 15,
              half_precision=False)
+
+
+if __name__== "__main__":
+    module_main()
