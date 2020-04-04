@@ -122,11 +122,10 @@ def generate_datasets(dataset_base, batch_size, half_precision, new_size=(600, 6
         os.path.join(dataset_base, 'ADE20K_2016_07_26/images/validation'),
         transforms=get_transform(train=False),
         is_test=True,
-        max_size=10,
         labels=dataset.labels,
         half_precision=half_precision,
         new_size=new_size,
-        perc_normalization=downsampling)
+        perc_normalization=0)
 
     num_classes = len(dataset.labels)
 
@@ -181,16 +180,17 @@ def write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, mix
 
 
 def execute_experiment(dataset_base, batch_size=1, alpha=0.003, num_epochs=20, mask_hidden=256,
-                       half_precision=False, batch_accumulator=5, max_examples_eval=20, downsampling=0,
+                       half_precision=False, batch_accumulator=5, max_examples_eval=2, downsampling=0,
                        momentum=0.9, decay=0.0005, start_epoch=0,
                        model=None, data_loader=None, data_loader_test=None):
 
     log = section_logger()
     sublog = section_logger(1)
 
-    log('Starting experiment with: Alpha = [{}], Hidden = [{}], Accumulator = [{}], ' +
-        'Mixed = [{}], Down = [{}], Momentum=[{}], Decay=[{}]'.format(alpha, mask_hidden, batch_accumulator,
-                                                                      half_precision, downsampling, momentum, decay))
+    log('Starting experiment with: Alpha = [{}], Hidden = [{}], Accumulator = [{}], '.format(alpha,
+                                                                                             mask_hidden,
+                                                                                             batch_accumulator) +
+        'Mixed = [{}], Down = [{}], Momentum=[{}], Decay=[{}]'.format(half_precision, downsampling, momentum, decay))
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
