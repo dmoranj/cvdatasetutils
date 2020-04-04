@@ -24,6 +24,9 @@ from torch.utils.tensorboard import SummaryWriter
 from cvdatasetutils.basicevaluation import evaluate_map, evaluate_masks
 
 
+ANALYSIS_FILE = 'MaskRCNNAnalysis.csv'
+
+
 class AnchorGeneratorHalfWrapper(AnchorGenerator):
     def generate_anchors(self, scales, aspect_ratios, dtype=torch.float32, device="cpu"):
         return super().generate_anchors(scales, aspect_ratios, dtype, device)
@@ -142,8 +145,10 @@ def clean_tensor(t):
 
 
 def write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, mixed,
-                             results_test, results_train, epoch, time, mask_hidden, map, mask):
-    evaluation_path = './models/MaskRCNNAnalysis.csv'
+                             results_test, results_train, epoch, time, mask_hidden, map_train, mask_train,
+                             map_test, mask_test, downsampling, momentum, decay):
+
+    evaluation_path = os.path.join('./models', ANALYSIS_FILE)
 
     results = {
         'test': results_test,
@@ -156,7 +161,7 @@ def write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, mix
         for batch_n, row in enumerate(results[dataset]):
             raw_values = [
                 epoch, dataset, model_id, alpha, batch_accumulator, batch_size, mixed, time, mask_hidden,
-                map, mask
+                map_train, mask_train, map_test, mask_test, downsampling, momentum, decay
             ]
             raw_values += results[dataset][batch_n]
 
@@ -164,7 +169,7 @@ def write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, mix
 
     raw_df = pd.DataFrame(data, columns=[
         "epoch", "dataset", "model_id", "alpha", "batch_accumulator", "batch_size", "mixed", "time", "mask_hidden",
-        "map", "mask",
+        "map_train", "mask_train", "map_test", "mask_test", "downsampling", "momentum", "decay",
         "batch_n", "loss", 'loss_classifier', 'loss_box_reg', 'loss_mask', 'loss_objectness', 'loss_rpn_box_reg',
         "gpu_total", "gpu_used", "gpu_free", "ram_current", "ram_peak"
     ])
@@ -176,25 +181,30 @@ def write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, mix
 
 
 def execute_experiment(dataset_base, batch_size=1, alpha=0.003, num_epochs=20, mask_hidden=256,
-                       half_precision=False, batch_accumulator=5, max_examples_eval=5, downsampling=0,
-                       momentum=0.9, decay=0.0005):
+                       half_precision=False, batch_accumulator=5, max_examples_eval=20, downsampling=0,
+                       momentum=0.9, decay=0.0005, start_epoch=0,
+                       model=None, data_loader=None, data_loader_test=None):
+
     log = section_logger()
     sublog = section_logger(1)
 
-    log('Starting experiment with: Alpha = [{}], Hidden = [{}], Accumulator = [{}], Mixed = [{}], Down = [{}], Momentum=[{}], Decay=[{}]'.format(
-        alpha, mask_hidden, batch_accumulator, half_precision, downsampling, momentum, decay))
+    log('Starting experiment with: Alpha = [{}], Hidden = [{}], Accumulator = [{}], ' +
+        'Mixed = [{}], Down = [{}], Momentum=[{}], Decay=[{}]'.format(alpha, mask_hidden, batch_accumulator,
+                                                                      half_precision, downsampling, momentum, decay))
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
     log('Generating datasets')
-    data_loader, data_loader_test, dataset, dataset_test, num_classes = generate_datasets(dataset_base,
-                                                                                          batch_size=batch_size,
-                                                                                          half_precision=half_precision,
-                                                                                          downsampling=downsampling)
+    if data_loader is None or data_loader_test is None:
+        dataset_results = generate_datasets(dataset_base, batch_size=batch_size,
+                                            half_precision=half_precision, downsampling=downsampling)
+
+        data_loader, data_loader_test, dataset, dataset_test, num_classes = dataset_results
 
     log('Generating segmentation model')
-    model = get_model_instance_segmentation(num_classes, device, mask_hidden_layer=mask_hidden,
-                                            half_precision=half_precision)
+    if model == None:
+        model = get_model_instance_segmentation(num_classes, device, mask_hidden_layer=mask_hidden,
+                                                half_precision=half_precision)
 
     log('Create the optimizer')
     params = [p for p in model.parameters() if p.requires_grad]
@@ -211,7 +221,7 @@ def execute_experiment(dataset_base, batch_size=1, alpha=0.003, num_epochs=20, m
 
     writer = SummaryWriter('runs/MaskRCNN_{}'.format(model_id))
 
-    for epoch in range(num_epochs):
+    for epoch in range(start_epoch, start_epoch + num_epochs):
         sublog('Training epoch [{}]'.format(epoch))
         start = time.time()
         results_train = train_one_epoch(model, optimizer, data_loader, lr_scheduler, writer, device, epoch,
@@ -223,16 +233,17 @@ def execute_experiment(dataset_base, batch_size=1, alpha=0.003, num_epochs=20, m
         results_test = train_one_epoch(model, optimizer, data_loader_test, lr_scheduler, writer, device, epoch,
                                        print_freq=100, batch_accumulator=batch_accumulator, test=True)
 
-
         sublog('Evaluating epoch map [{}]'.format(epoch))
-        map, mask = compute_map(data_loader_test, device, model, max_examples_eval)
+        map_train, mask_train = compute_map(data_loader, device, model, max_examples_eval)
+        map_test, mask_test = compute_map(data_loader_test, device, model, max_examples_eval)
 
-        sublog('mAP={} maskAP={}'.format(map, mask))
+        sublog('Train performance: mAP={} maskAP={}'.format(map_train, mask_train))
+        sublog('Test performance: mAP={} maskAP={}'.format(map_test, mask_test))
 
         sublog('Writing the results')
         write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, half_precision,
                                  results_test, results_train, epoch, round(end - start), mask_hidden,
-                                 map, mask)
+                                 map_train, mask_train, map_test, mask_test, downsampling, momentum, decay)
 
         save_model('./models', model, "MaskRCNN_" + model_id)
 
@@ -421,10 +432,47 @@ def compute_map(data_loader, device, model, max_examples, max_oom_errors=5, erro
     return global_map, global_mask
 
 
+def extract_metaparameters(model_folder, model_file):
+
+    model_id = model_file.split('.')[0].split('_')[1]
+    path_analysis = os.path.join(model_folder, 'MaskRCNNAnalysis.csv')
+    analysis_df = pd.read_csv(path_analysis)
+    parameter_data = analysis_df[analysis_df.model_id.astype(str) == model_id].iloc[0]
+    last_epoch = analysis_df[analysis_df.model_id.astype(str) == model_id].epoch.max()
+
+    metaparameters = {
+        'hidden': parameter_data.mask_hidden,
+        'accumulator': parameter_data.batch_accumulator,
+        'alpha': parameter_data.alpha,
+        'downsampling': 0.3 if 'downsampling' not in parameter_data else parameter_data.downsampling,
+        'momentum': 0.95 if 'momentum' not in parameter_data else parameter_data.momentum,
+        'decay': 0.0005 if 'decay' not in parameter_data else parameter_data.decay,
+        'last_epoch': last_epoch
+    }
+
+    return metaparameters
+
+
+def finetune(model_folder, model_file, dataset_base, half_precision, num_epochs):
+    model_path = os.path.join(model_folder, model_file)
+
+    loaded_data = load_model_and_dataset(dataset_base, None, model_path, half_precision=half_precision)
+    dataset, dataset_test, model, device, data_loader, data_loader_test = loaded_data
+
+    metaparameters = extract_metaparameters(model_folder, model_file)
+
+    execute_experiment(dataset_base, batch_size=3, alpha=metaparameters['alpha'], num_epochs=num_epochs,
+                       mask_hidden=metaparameters['hidden'], half_precision=half_precision,
+                       batch_accumulator=metaparameters['accumulator'], downsampling=metaparameters['downsampling'],
+                       momentum=metaparameters['momentum'], decay=metaparameters['decay'],
+                       model=model, data_loader=data_loader, data_loader_test=data_loader_test,
+                       start_epoch=metaparameters['last_epoch'] + 1)
+
+
 def module_main():
-    option = 1
-    #dataset_base = "/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K"
-    dataset_base = "/home/daniel/Documentos/Doctorado/Datasets/ADE20K"
+    option = 3
+    dataset_base = "/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K"
+    #dataset_base = "/home/daniel/Documentos/Doctorado/Datasets/ADE20K"
 
     if option == 1:
         metaparameter_experiments(10, dataset_base)
@@ -433,6 +481,14 @@ def module_main():
                  dataset_base,
                  5,
                  half_precision=False)
+    elif option == 3:
+        finetune(
+            './models',
+            'MaskRCNN_202004032310.pt',
+            dataset_base,
+            half_precision=False,
+            num_epochs=10
+        )
     else:
         test('./models/MaskRCNN_202004012149.pt',
              dataset_base,
