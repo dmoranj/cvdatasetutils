@@ -13,7 +13,7 @@ from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 from cvdatasetutils.ad20kfrcnn import AD20kFasterRCNN
 from time import gmtime, strftime
 from cvdatasetutils.imageutils import show_objects_in_image
-from cvdatasetutils.dnnutils import get_transform
+from cvdatasetutils.dnnutils import get_transform, clean_from_error
 from mltrainingtools.cmdlogging import section_logger
 import pandas as pd
 from apex import amp
@@ -227,6 +227,8 @@ def execute_experiment(dataset_base, batch_size=1, alpha=0.003, num_epochs=20, m
         sublog('Evaluating epoch map [{}]'.format(epoch))
         map, mask = compute_map(data_loader_test, device, model, max_examples_eval)
 
+        sublog('mAP={} maskAP={}'.format(map, mask))
+
         sublog('Writing the results')
         write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, half_precision,
                                  results_test, results_train, epoch, round(end - start), mask_hidden,
@@ -375,25 +377,39 @@ def evaluate(input_path, dataset_base, n, half_precision=False):
     print('Test mAP={} and the MaskAP={}'.format(global_map, global_mask))
 
 
-def compute_map(data_loader, device, model, max_examples):
+def compute_map(data_loader, device, model, max_examples, max_oom_errors=5, error_delay=5):
     num_examples = 0
     global_map = []
     global_mask = []
 
     model.eval()
 
+    oom_error = 0
+
     for id, objects in enumerate(data_loader):
-        images = [image.to(device) for image in objects[0]]
-        predictions = model(images)
+        try:
+            images = [image.to(device) for image in objects[0]]
+            predictions = model(images)
 
-        for image_id, ground_truth in enumerate(objects[1]):
-            _, width, height = images[image_id].shape
+            for image_id, ground_truth in enumerate(objects[1]):
+                _, width, height = images[image_id].shape
 
-            local_map, _ = evaluate_map(predictions[image_id], ground_truth, width, height)
-            local_mask_value, _ = evaluate_masks(predictions[image_id], ground_truth, width, height)
+                local_map, _ = evaluate_map(predictions[image_id], ground_truth, width, height)
+                local_mask_value, _ = evaluate_masks(predictions[image_id], ground_truth, width, height)
 
-            global_map.append(local_map)
-            global_mask.append(local_mask_value)
+                global_map.append(local_map)
+                global_mask.append(local_mask_value)
+        except RuntimeError as e:
+            if 'out of memory' in str(e) and oom_error < max_oom_errors:
+                print('| WARNING: ran out of memory, retrying batch on 5s')
+                clean_from_error(error_delay, model, oom_error)
+                oom_error += 1
+            elif 'illegal' in str(e) and oom_error < max_oom_errors:
+                print('Illegal memory access found, retrying anyway, and logging')
+                oom_error += 1
+            else:
+                print('| Couldnt recover from OOM error or similar', e)
+                raise e
 
         if num_examples > max_examples:
             break
@@ -407,8 +423,8 @@ def compute_map(data_loader, device, model, max_examples):
 
 def module_main():
     option = 1
-    dataset_base = "/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K"
-    #dataset_base = "/home/daniel/Documentos/Doctorado/Datasets/ADE20K"
+    #dataset_base = "/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K"
+    dataset_base = "/home/daniel/Documentos/Doctorado/Datasets/ADE20K"
 
     if option == 1:
         metaparameter_experiments(10, dataset_base)

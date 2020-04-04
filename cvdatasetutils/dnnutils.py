@@ -3,10 +3,22 @@ import torch.nn as nn
 import json
 import cvdatasetutils.transforms as T
 from torchvision.transforms import Resize, ColorJitter
+import torch
+import time
+
 
 def load_json(path):
     with open(path, "r") as f:
         return json.load(f)
+
+
+def clean_from_error(error_delay, model, oom_error):
+    time.sleep(error_delay * (2 ** oom_error))
+    for p in model.parameters():
+        if p.grad is not None:
+            del p.grad
+
+    torch.cuda.empty_cache()
 
 
 def load_pretrained(num_classes, backbone, finetune=False, remove_linear=True, finetune_skipping=None):

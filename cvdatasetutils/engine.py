@@ -10,7 +10,7 @@ import time
 from apex import amp
 import torchvision.models.detection.mask_rcnn
 from py3nvml import py3nvml
-
+from cvdatasetutils.dnnutils import clean_from_error
 import cvdatasetutils.utils as utils
 
 import tracemalloc
@@ -162,15 +162,6 @@ def train_one_epoch(model, optimizer, data_loader, lr_scheduler, writer, device,
             tracemalloc.stop()
 
     return history
-
-
-def clean_from_error(error_delay, model, oom_error):
-    time.sleep(error_delay * (2 ** oom_error))
-    for p in model.parameters():
-        if p.grad is not None:
-            del p.grad
-
-    torch.cuda.empty_cache()
 
 
 def log_error(e):
