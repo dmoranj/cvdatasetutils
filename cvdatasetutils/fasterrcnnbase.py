@@ -303,9 +303,9 @@ METAPARAMETER_DEF = {
         },
     'accumulator':
         {
-            'base': 15,
-            'range': 25,
-            'default': 50,
+            'base': 5,
+            'range': 20,
+            'default': 15,
             'type': 'integer'
         },
     'alpha':
@@ -352,7 +352,7 @@ def metaparameter_experiments(metaparameter_number, dataset_base):
             momentum= metaparameters['momentum'][meta_id]
             decay = metaparameters['decay'][meta_id]
 
-            execute_experiment(dataset_base, batch_size=3, alpha=alpha, num_epochs=3, mask_hidden=hidden,
+            execute_experiment(dataset_base, batch_size=5, alpha=alpha, num_epochs=4, mask_hidden=hidden,
                                half_precision=mixed, batch_accumulator=accumulator, downsampling=downsampling,
                                momentum=momentum, decay=decay)
 
@@ -475,7 +475,7 @@ def module_main():
     #dataset_base = "/home/daniel/Documentos/Doctorado/Datasets/ADE20K"
 
     if option == 1:
-        metaparameter_experiments(10, dataset_base)
+        metaparameter_experiments(20, dataset_base)
     elif option == 2:
         evaluate('./models/MaskRCNN_202004012149.pt',
                  dataset_base,
