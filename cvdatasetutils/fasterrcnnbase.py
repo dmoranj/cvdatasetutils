@@ -104,13 +104,14 @@ def save_model(output_path, model, name):
     torch.save(model.state_dict(), os.path.join(output_path, name + '.pt'))
 
 
-def generate_datasets(dataset_base, batch_size, half_precision, new_size=(600, 600)):
+def generate_datasets(dataset_base, batch_size, half_precision, new_size=(600, 600), downsampling=0):
     dataset = AD20kFasterRCNN(
         os.path.join(dataset_base, 'ADE20K_CLEAN/ade20ktrain.csv'),
         os.path.join(dataset_base, 'ADE20K_2016_07_26/images/training'),
         transforms=get_transform(train=True),
         half_precision=half_precision,
-        new_size=new_size
+        new_size=new_size,
+        perc_normalization=downsampling
     )
 
     dataset_test = AD20kFasterRCNN(
@@ -121,7 +122,8 @@ def generate_datasets(dataset_base, batch_size, half_precision, new_size=(600, 6
         max_size=10,
         labels=dataset.labels,
         half_precision=half_precision,
-        new_size=new_size)
+        new_size=new_size,
+        perc_normalization=downsampling)
 
     num_classes = len(dataset.labels)
 
@@ -174,18 +176,21 @@ def write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, mix
 
 
 def execute_experiment(dataset_base, batch_size=1, alpha=0.003, num_epochs=20, mask_hidden=256,
-                       half_precision=False, batch_accumulator=5, max_examples_eval=5):
+                       half_precision=False, batch_accumulator=5, max_examples_eval=5, downsampling=0,
+                       momentum=0.9, decay=0.0005):
     log = section_logger()
     sublog = section_logger(1)
 
-    log('Starting experiment with: Alpha = [{}], Hidden = [{}], Accumulator = [{}], Mixed = [{}]'.format(
-        alpha, mask_hidden, batch_accumulator, half_precision))
+    log('Starting experiment with: Alpha = [{}], Hidden = [{}], Accumulator = [{}], Mixed = [{}], Down = [{}], Momentum=[{}], Decay=[{}]'.format(
+        alpha, mask_hidden, batch_accumulator, half_precision, downsampling, momentum, decay))
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
     log('Generating datasets')
-    data_loader, data_loader_test, dataset, dataset_test, num_classes = generate_datasets(dataset_base, batch_size=batch_size,
-                                                                   half_precision=half_precision)
+    data_loader, data_loader_test, dataset, dataset_test, num_classes = generate_datasets(dataset_base,
+                                                                                          batch_size=batch_size,
+                                                                                          half_precision=half_precision,
+                                                                                          downsampling=downsampling)
 
     log('Generating segmentation model')
     model = get_model_instance_segmentation(num_classes, device, mask_hidden_layer=mask_hidden,
@@ -193,7 +198,7 @@ def execute_experiment(dataset_base, batch_size=1, alpha=0.003, num_epochs=20, m
 
     log('Create the optimizer')
     params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.SGD(params, lr=alpha, momentum=0.9, weight_decay=0.0005)
+    optimizer = torch.optim.SGD(params, lr=alpha, momentum=momentum, weight_decay=decay)
 
     log('Create the learning rate scheduler')
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.1)
@@ -285,8 +290,8 @@ METAPARAMETER_DEF = {
         },
     'accumulator':
         {
-            'base': 2,
-            'range': 13,
+            'base': 15,
+            'range': 25,
             'default': 50,
             'type': 'integer'
         },
@@ -296,7 +301,29 @@ METAPARAMETER_DEF = {
             'range': 2,
             'default': 1e-4,
             'type': 'smallfloat'
+        },
+    'downsampling':
+        {
+            'base': 0.3,
+            'range': 1,
+            'default': 1e-4,
+            'type': 'smallfloat'
+        },
+    'momentum':
+        {
+            'base': 1e-3,
+            'range': 0.1,
+            'default': 2e-2,
+            'type': 'smallfloat'
+        },
+    'decay':
+        {
+            'base': 3,
+            'range': 2,
+            'default':5e-4,
+            'type': 'smallfloat'
         }
+
 }
 
 
@@ -308,9 +335,13 @@ def metaparameter_experiments(metaparameter_number, dataset_base):
             accumulator = int(metaparameters['accumulator'][meta_id])
             alpha = metaparameters['alpha'][meta_id]
             hidden = metaparameters['hidden'][meta_id]
+            downsampling = metaparameters['downsampling'][meta_id]
+            momentum= metaparameters['momentum'][meta_id]
+            decay = metaparameters['decay'][meta_id]
 
-            execute_experiment(dataset_base, batch_size=5, alpha=alpha,
-                               num_epochs=5, mask_hidden=hidden, half_precision=mixed, batch_accumulator=accumulator)
+            execute_experiment(dataset_base, batch_size=3, alpha=alpha, num_epochs=3, mask_hidden=hidden,
+                               half_precision=mixed, batch_accumulator=accumulator, downsampling=downsampling,
+                               momentum=momentum, decay=decay)
 
 
 def load_model_and_dataset(dataset_base, mask_hidden_layers, model_path, batch_size=2, half_precision=True):

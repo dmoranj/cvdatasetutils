@@ -12,7 +12,7 @@ library(tidyr)
 ```
 
 ```{r}
-pathModelData <- './cvdatasetutils/models/MaskRCNNAnalysisTorre.csv'
+pathModelData <- './cvdatasetutils/models/MaskRCNNAnalysis.csv'
 
 modelData <- read.csv(pathModelData)%>%
   mutate(model_id=as.character(model_id))
@@ -43,7 +43,8 @@ lossData <- modelData %>%
 modelData %>%
   group_by(id) %>%
   summarize(model_id=last(model_id), alpha=max(alpha), batch_size=last(batch_size), real_batch=last(batch_size)*last(batch_accumulator), 
-            mixed=last(mixed), maxTime=max(time/3600), minTime=min(time(3600)), minLoss=min(loss)/min(batch_accumulator), maxGpu=max(gpu_total)) %>%
+            mixed=last(mixed), maxTime=max(time/3600), minLoss=min(loss)/min(batch_accumulator), maxGpu=max(gpu_total),
+            map=max(map)) %>%
   arrange(minLoss)
 ```
 
