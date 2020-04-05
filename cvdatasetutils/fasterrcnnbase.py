@@ -180,7 +180,7 @@ def write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, mix
 
 
 def execute_experiment(dataset_base, batch_size=1, alpha=0.003, num_epochs=20, mask_hidden=256,
-                       half_precision=False, batch_accumulator=5, max_examples_eval=2, downsampling=0,
+                       half_precision=False, batch_accumulator=5, max_examples_eval=30, downsampling=0,
                        momentum=0.9, decay=0.0005, start_epoch=0,
                        model=None, data_loader=None, data_loader_test=None):
 
@@ -470,9 +470,9 @@ def finetune(model_folder, model_file, dataset_base, half_precision, num_epochs)
 
 
 def module_main():
-    option = 3
-    dataset_base = "/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K"
-    #dataset_base = "/home/daniel/Documentos/Doctorado/Datasets/ADE20K"
+    option = 1
+    #dataset_base = "/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K"
+    dataset_base = "/home/daniel/Documentos/Doctorado/Datasets/ADE20K"
 
     if option == 1:
         metaparameter_experiments(20, dataset_base)
