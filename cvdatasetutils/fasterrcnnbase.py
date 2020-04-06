@@ -107,7 +107,8 @@ def save_model(output_path, model, name):
     torch.save(model.state_dict(), os.path.join(output_path, name + '.pt'))
 
 
-def generate_datasets(dataset_base, batch_size, half_precision, new_size=(600, 600), downsampling=0):
+def generate_datasets(dataset_base, batch_size, half_precision, new_size=(600, 600), downsampling=0,
+                      test_batch_size=2):
     dataset = AD20kFasterRCNN(
         os.path.join(dataset_base, 'ADE20K_CLEAN/ade20ktrain.csv'),
         os.path.join(dataset_base, 'ADE20K_2016_07_26/images/training'),
@@ -133,7 +134,7 @@ def generate_datasets(dataset_base, batch_size, half_precision, new_size=(600, 6
         dataset, batch_size=batch_size, shuffle=True, num_workers=4,
         collate_fn=utils.collate_fn)
     data_loader_test = torch.utils.data.DataLoader(
-        dataset_test, batch_size=batch_size, shuffle=False, num_workers=4,
+        dataset_test, batch_size=test_batch_size, shuffle=False, num_workers=4,
         collate_fn=utils.collate_fn)
 
     return data_loader, data_loader_test, dataset, dataset_test, num_classes
@@ -296,7 +297,7 @@ def test(input_path, dataset_base, output_path, n, half_precision=False):
 METAPARAMETER_DEF = {
     'hidden':
         {
-            'base': 200,
+            'base': 300,
             'range': 600,
             'default': 300,
             'type': 'integer'
@@ -352,7 +353,7 @@ def metaparameter_experiments(metaparameter_number, dataset_base):
             momentum= metaparameters['momentum'][meta_id]
             decay = metaparameters['decay'][meta_id]
 
-            execute_experiment(dataset_base, batch_size=5, alpha=alpha, num_epochs=4, mask_hidden=hidden,
+            execute_experiment(dataset_base, batch_size=4, alpha=alpha, num_epochs=4, mask_hidden=hidden,
                                half_precision=mixed, batch_accumulator=accumulator, downsampling=downsampling,
                                momentum=momentum, decay=decay)
 
