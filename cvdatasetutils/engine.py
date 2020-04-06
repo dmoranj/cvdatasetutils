@@ -53,7 +53,7 @@ def register_evolution(counter, epoch, loss_value, loss_dict_reduced, data_loade
 
 
 def train_one_epoch(model, optimizer, data_loader, lr_scheduler, writer, device, epoch, print_freq, test=False,
-                    max_iters=1e2, max_oom_errors=5, error_delay=5, max_nan_errors=5,
+                    max_iters=1e20, max_oom_errors=5, error_delay=5, max_nan_errors=5,
                     batch_accumulator=1, history_freq=50, half_precision=False):
     tracemalloc.start()
 

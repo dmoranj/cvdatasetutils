@@ -25,6 +25,7 @@ from cvdatasetutils.basicevaluation import evaluate_map, evaluate_masks
 
 
 ANALYSIS_FILE = 'MaskRCNNAnalysis.csv'
+FINETUNE_FILE = 'MaskRCNNFinetune_{}.csv'
 
 
 class AnchorGeneratorHalfWrapper(AnchorGenerator):
@@ -180,9 +181,9 @@ def write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, mix
 
 
 def execute_experiment(dataset_base, batch_size=1, alpha=0.003, num_epochs=20, mask_hidden=256,
-                       half_precision=False, batch_accumulator=5, max_examples_eval=2, downsampling=0,
+                       half_precision=False, batch_accumulator=5, max_examples_eval=20, downsampling=0,
                        momentum=0.9, decay=0.0005, start_epoch=0,
-                       model=None, data_loader=None, data_loader_test=None):
+                       model=None, data_loader=None, data_loader_test=None, model_id=None):
 
     log = section_logger()
     sublog = section_logger(1)
@@ -217,7 +218,8 @@ def execute_experiment(dataset_base, batch_size=1, alpha=0.003, num_epochs=20, m
         log('Optimizing with AMP')
         model, optimizer = amp.initialize(model, optimizer, opt_level='O1')
 
-    model_id = strftime("%Y%m%d%H%M", gmtime())
+    if model_id == None:
+        model_id = strftime("%Y%m%d%H%M", gmtime())
 
     writer = SummaryWriter('runs/MaskRCNN_{}'.format(model_id))
 
@@ -265,7 +267,7 @@ def load_frcnn(input_path, num_classes, device, mask_hidden_layers, eval=True, h
     return model
 
 
-def test(input_path, dataset_base, output_path, n, half_precision=False):
+def test(input_path, dataset_base, output_path, n, half_precision=False, threshold=0.3):
 
     dataset, dataset_test, model, device, data_loader, data_loader_test = load_model_and_dataset(dataset_base,
                                                                                                  None,
@@ -285,7 +287,7 @@ def test(input_path, dataset_base, output_path, n, half_precision=False):
 
         show_objects_in_image(output_path, clean_image, ground_truth, "{}".format(id), "FasterRCNN",
                               dataset.labels, predictions=predictions[0],
-                              prediction_classes=dataset.labels)
+                              prediction_classes=dataset.labels, threshold=threshold)
 
         if num_examples < n:
             num_examples += 1
@@ -296,8 +298,8 @@ def test(input_path, dataset_base, output_path, n, half_precision=False):
 METAPARAMETER_DEF = {
     'hidden':
         {
-            'base': 200,
-            'range': 600,
+            'base': 700,
+            'range': 400,
             'default': 300,
             'type': 'integer'
         },
@@ -310,8 +312,8 @@ METAPARAMETER_DEF = {
         },
     'alpha':
         {
-            'base': 1.1,
-            'range': 2,
+            'base': 1,
+            'range': 1,
             'default': 1e-4,
             'type': 'smallfloat'
         },
@@ -433,7 +435,6 @@ def compute_map(data_loader, device, model, max_examples, max_oom_errors=5, erro
 
 
 def extract_metaparameters(model_folder, model_file):
-
     model_id = model_file.split('.')[0].split('_')[1]
     path_analysis = os.path.join(model_folder, 'MaskRCNNAnalysis.csv')
     analysis_df = pd.read_csv(path_analysis)
@@ -447,13 +448,14 @@ def extract_metaparameters(model_folder, model_file):
         'downsampling': 0.3 if 'downsampling' not in parameter_data else parameter_data.downsampling,
         'momentum': 0.95 if 'momentum' not in parameter_data else parameter_data.momentum,
         'decay': 0.0005 if 'decay' not in parameter_data else parameter_data.decay,
-        'last_epoch': last_epoch
+        'last_epoch': last_epoch,
+        'model_id': model_id
     }
 
     return metaparameters
 
 
-def finetune(model_folder, model_file, dataset_base, half_precision, num_epochs):
+def finetune(model_folder, model_file, dataset_base, half_precision, num_epochs, fixed_metaparameters=None):
     model_path = os.path.join(model_folder, model_file)
 
     loaded_data = load_model_and_dataset(dataset_base, None, model_path, half_precision=half_precision)
@@ -461,16 +463,21 @@ def finetune(model_folder, model_file, dataset_base, half_precision, num_epochs)
 
     metaparameters = extract_metaparameters(model_folder, model_file)
 
+    if fixed_metaparameters is not None:
+        for key, value in fixed_metaparameters.items():
+            metaparameters[key] = value
+
     execute_experiment(dataset_base, batch_size=3, alpha=metaparameters['alpha'], num_epochs=num_epochs,
                        mask_hidden=metaparameters['hidden'], half_precision=half_precision,
                        batch_accumulator=metaparameters['accumulator'], downsampling=metaparameters['downsampling'],
                        momentum=metaparameters['momentum'], decay=metaparameters['decay'],
                        model=model, data_loader=data_loader, data_loader_test=data_loader_test,
-                       start_epoch=metaparameters['last_epoch'] + 1)
+                       start_epoch=metaparameters['last_epoch'] + 1,
+                       model_id=metaparameters['model_id'])
 
 
 def module_main():
-    option = 3
+    option = 4
     dataset_base = "/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K"
     #dataset_base = "/home/daniel/Documentos/Doctorado/Datasets/ADE20K"
 
@@ -487,10 +494,13 @@ def module_main():
             'MaskRCNN_202004032310.pt',
             dataset_base,
             half_precision=False,
-            num_epochs=10
+            num_epochs=4,
+            fixed_metaparameters={
+                'alpha': 0.003
+            }
         )
     else:
-        test('./models/MaskRCNN_202004012149.pt',
+        test('./models/MaskRCNN_202004051526.pt',
              dataset_base,
              '../images', 15,
              half_precision=False)

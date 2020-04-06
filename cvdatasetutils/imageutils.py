@@ -63,7 +63,7 @@ def save_image(evaluation_path, image, name, title):
 
 
 def show_objects_in_image(evaluation_path, image, ground_truth, name, title, classes, colormap=None,
-                          predictions=None, prediction_classes=None, segmentation_alpha=0.3):
+                          predictions=None, prediction_classes=None, segmentation_alpha=0.7, threshold=0.5):
     """
     Draw the objects and segmentation masks over the passed image (for separate images if containing the predictions)
 
@@ -77,6 +77,8 @@ def show_objects_in_image(evaluation_path, image, ground_truth, name, title, cla
     :param predictions:
     :param prediction_classes:
     :param segmentation_alpha:
+    ;param threshold:
+
     :return:
     """
 
@@ -86,11 +88,13 @@ def show_objects_in_image(evaluation_path, image, ground_truth, name, title, cla
     if predictions is not None:
         predictions['masks'] = predictions['masks'].squeeze()
         draw_objects_in_image("ex_{}_{}_pred.png", evaluation_path, image, predictions, name, title,
-                              prediction_classes, colormap, segmentation_alpha, test=True)
+                              prediction_classes, colormap, segmentation_alpha, test=True,
+                              threshold=threshold)
 
 
 def draw_objects_in_image(img_name, evaluation_path, image, ground_truth, name, title,
-                          classes, colormap=None, segmentation_alpha=0.8, test=False):
+                          classes, colormap=None, segmentation_alpha=0.8, test=False,
+                          threshold=0.5):
 
     fig = plt.figure(frameon=False)
 
@@ -101,7 +105,7 @@ def draw_objects_in_image(img_name, evaluation_path, image, ground_truth, name, 
     plt.title(title)
 
     colors = [value for value in mcolors.TABLEAU_COLORS.values()]
-    draw_objects(ax, classes, ground_truth, colors)
+    draw_objects(ax, classes, ground_truth, colors, threshold=threshold, ground_truth=not test)
 
     if 'masks' in ground_truth.keys():
         mask = generate_mask(ground_truth, colors, test)
@@ -141,7 +145,7 @@ def generate_mask(ground_truth, colors, test):
             masks = masks.detach().cpu().numpy()
 
     for mask_id, obj_mask in enumerate(masks):
-        color = mcolors.to_rgb(colors[mask_id % len(colors)])
+        color = mcolors.to_rgb(colors[(mask_id + 1) % len(colors)])
 
         for color_index, color_value in enumerate(color):
             try:

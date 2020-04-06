@@ -18,7 +18,7 @@ IMAGE_EXTENSION = ".jpg"
 
 def create_object_masks(segmentation, new_size):
     if new_size is not None:
-        segmentation = F.resize(segmentation, new_size)
+        segmentation = F.resize(segmentation, new_size, interpolation=Image.NEAREST)
 
     mask = np.array(segmentation)
     _, _, B = np.swapaxes(mask, 0, 2)
@@ -163,7 +163,8 @@ class AD20kFasterRCNN(Dataset):
 def test_ds(n, path):
     ds = AD20kFasterRCNN(os.path.join(path, 'ade20ktrain.csv'),
                          '/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K/ADE20K_2016_07_26/images/training',
-                         transforms=T.Compose([]), return_segmentation=True)
+                         transforms=T.Compose([]), return_segmentation=True,
+                         new_size=(600, 600))
 
     num_examples = 0
 
@@ -195,4 +196,4 @@ def nlp_test():
 
 
 if __name__== "__main__":
-    test_ds(5, '/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K/ADE20K_CLEAN')
+    test_ds(10, '/home/dani/Documentos/Proyectos/Doctorado/Datasets/ADE20K/ADE20K_CLEAN')
