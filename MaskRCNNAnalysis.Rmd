@@ -75,3 +75,64 @@ memData %>%
     geom_line(alpha=0.2) +
     geom_smooth(method="loess")
 ```
+
+
+## Finetuning models
+
+```{r}
+pathModels <- './cvdatasetutils/models/'
+finetuneFiles <- list.files(pathModels, pattern=".*Finetune.*csv")
+
+finetuneData <- data.frame()
+
+for (file in finetuneFiles) {
+  finetuneFileData <- read.csv(paste(pathModels, file, sep='/'))
+  finetuneData <- rbind(finetuneData, finetuneFileData)
+}
+
+finetuneData <- finetuneData %>%
+  arrange(epoch, batch_n) %>%
+  mutate(model_id=as.character(model_id))
+```
+
+
+```{r}
+finetuneData %>%
+  group_by(model_id, dataset) %>%
+  summarize(alpha=max(alpha), downs=max(downsampling), real_batch=last(batch_size)*last(batch_accumulator), 
+            hidden=max(mask_hidden),minLoss=min(loss)/min(batch_accumulator),
+            map_train_max=max(map_train), map_train_min=min(map_train), map_test_max=max(map_test), map_test_min=min(map_test))
+```
+
+
+```{r}
+finetuneData %>%
+  group_by(model_id, epoch, dataset) %>%
+  summarize(loss=max(loss)) %>%
+  ggplot(aes(x=epoch, y=loss, group=dataset, color=dataset)) +
+    geom_line()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

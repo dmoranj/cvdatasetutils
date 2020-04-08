@@ -89,18 +89,6 @@ def get_model_instance_segmentation(num_classes, device, mask_hidden_layer, half
 
     model = model.to(device)
 
-    if False:
-        model.half()
-        model.backbone.half()
-        model.roi_heads.box_predictor.half()
-        model.roi_heads.mask_predictor.half()
-
-        for layer in model.modules():
-            if isinstance(layer, torch.nn.BatchNorm2d) or isinstance(layer, torchvision.ops.misc.FrozenBatchNorm2d):
-                layer.float()
-            else:
-                layer.half()
-
     return model
 
 
@@ -134,6 +122,7 @@ def generate_datasets(dataset_base, batch_size, half_precision, new_size=(600, 6
     data_loader = torch.utils.data.DataLoader(
         dataset, batch_size=batch_size, shuffle=True, num_workers=4,
         collate_fn=utils.collate_fn)
+
     data_loader_test = torch.utils.data.DataLoader(
         dataset_test, batch_size=test_batch_size, shuffle=False, num_workers=4,
         collate_fn=utils.collate_fn)
@@ -147,9 +136,8 @@ def clean_tensor(t):
 
 def write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, mixed,
                              results_test, results_train, epoch, time, mask_hidden, map_train, mask_train,
-                             map_test, mask_test, downsampling, momentum, decay):
+                             map_test, mask_test, downsampling, momentum, decay, evaluation_path):
 
-    evaluation_path = os.path.join('./models', ANALYSIS_FILE)
 
     results = {
         'test': results_test,
@@ -182,9 +170,9 @@ def write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, mix
 
 
 def execute_experiment(dataset_base, batch_size=1, alpha=0.003, num_epochs=20, mask_hidden=256,
-                       half_precision=False, batch_accumulator=5, max_examples_eval=30, downsampling=0,
+                       half_precision=False, batch_accumulator=5, max_examples_eval=10, downsampling=0,
                        momentum=0.9, decay=0.0005, start_epoch=0,
-                       model=None, data_loader=None, data_loader_test=None, model_id=None):
+                       model=None, data_loader=None, data_loader_test=None, model_id_finetune=None):
 
     log = section_logger()
     sublog = section_logger(1)
@@ -219,8 +207,10 @@ def execute_experiment(dataset_base, batch_size=1, alpha=0.003, num_epochs=20, m
         log('Optimizing with AMP')
         model, optimizer = amp.initialize(model, optimizer, opt_level='O1')
 
-    if model_id == None:
+    if model_id_finetune is None:
         model_id = strftime("%Y%m%d%H%M", gmtime())
+    else:
+        model_id = model_id_finetune
 
     writer = SummaryWriter('runs/MaskRCNN_{}'.format(model_id))
 
@@ -244,9 +234,15 @@ def execute_experiment(dataset_base, batch_size=1, alpha=0.003, num_epochs=20, m
         sublog('Test performance: mAP={} maskAP={}'.format(map_test, mask_test))
 
         sublog('Writing the results')
+        if model_id_finetune is not None:
+            evaluation_path = os.path.join('./models', FINETUNE_FILE.format(model_id_finetune))
+        else:
+            evaluation_path = os.path.join('./models', ANALYSIS_FILE)
+
         write_evaluation_results(model_id, alpha, batch_accumulator, batch_size, half_precision,
                                  results_test, results_train, epoch, round(end - start), mask_hidden,
-                                 map_train, mask_train, map_test, mask_test, downsampling, momentum, decay)
+                                 map_train, mask_train, map_test, mask_test, downsampling, momentum, decay,
+                                 evaluation_path=evaluation_path)
 
         save_model('./models', model, "MaskRCNN_" + model_id)
 
@@ -268,7 +264,8 @@ def load_frcnn(input_path, num_classes, device, mask_hidden_layers, eval=True, h
     return model
 
 
-def test(input_path, dataset_base, output_path, n, half_precision=False, threshold=0.3):
+def test(input_path, dataset_base, output_path, n, half_precision=False, threshold=0.3,
+         segmentation_alpha=0.3, mask_threshold=0.1, test=True):
 
     dataset, dataset_test, model, device, data_loader, data_loader_test = load_model_and_dataset(dataset_base,
                                                                                                  None,
@@ -279,21 +276,32 @@ def test(input_path, dataset_base, output_path, n, half_precision=False, thresho
 
     num_examples = 0
 
-    for id, objects in enumerate(dataset_test):
-        image = objects[0].to(device)
-        predictions = model([image])
-        ground_truth = objects[1]
+    if test:
+        dataset_origin = data_loader_test
+    else:
+        dataset_origin = data_loader
 
-        clean_image = image.permute(1, 2, 0).detach().cpu().numpy()
+    for id, objects in enumerate(dataset_origin):
+        try:
+            images = [image.to(device) for image in objects[0]]
+            predictions = model(images)
 
-        show_objects_in_image(output_path, clean_image, ground_truth, "{}".format(id), "FasterRCNN",
-                              dataset.labels, predictions=predictions[0],
-                              prediction_classes=dataset.labels, threshold=threshold)
+            for image_id, ground_truth in enumerate(objects[1]):
+                _, width, height = images[image_id].shape
 
-        if num_examples < n:
-            num_examples += 1
-        else:
-            break
+                clean_image = images[image_id].permute(1, 2, 0).detach().cpu().numpy()
+
+                show_objects_in_image(output_path, clean_image, ground_truth, "{}".format(id), "FasterRCNN",
+                                      dataset.labels, predictions=predictions[image_id],
+                                      prediction_classes=dataset.labels, threshold=threshold,
+                                      segmentation_alpha=segmentation_alpha, mask_threshold=mask_threshold)
+
+                if num_examples < n:
+                    num_examples += 1
+                else:
+                    return
+        except:
+            print('Exception trying to print test image')
 
 
 METAPARAMETER_DEF = {
@@ -435,6 +443,17 @@ def compute_map(data_loader, device, model, max_examples, max_oom_errors=5, erro
     return global_map, global_mask
 
 
+def create_finetune_analysis(model_folder, model_id, analysis_df):
+    analysis_file_path = os.path.join(model_folder, FINETUNE_FILE.format(model_id))
+
+    if os.path.exists(analysis_file_path):
+       return
+
+    model_df = analysis_df[analysis_df.model_id.astype(str) == model_id]
+    model_df = model_df.drop(columns=model_df.columns[0])
+    model_df.to_csv(analysis_file_path, mode='a')
+
+
 def extract_metaparameters(model_folder, model_file):
     model_id = model_file.split('.')[0].split('_')[1]
     path_analysis = os.path.join(model_folder, 'MaskRCNNAnalysis.csv')
@@ -452,6 +471,8 @@ def extract_metaparameters(model_folder, model_file):
         'last_epoch': last_epoch,
         'model_id': model_id
     }
+
+    create_finetune_analysis(model_folder, model_id, analysis_df)
 
     return metaparameters
 
@@ -474,7 +495,7 @@ def finetune(model_folder, model_file, dataset_base, half_precision, num_epochs,
                        momentum=metaparameters['momentum'], decay=metaparameters['decay'],
                        model=model, data_loader=data_loader, data_loader_test=data_loader_test,
                        start_epoch=metaparameters['last_epoch'] + 1,
-                       model_id=metaparameters['model_id'])
+                       model_id_finetune=metaparameters['model_id'])
 
 
 def module_main():
@@ -492,19 +513,20 @@ def module_main():
     elif option == 3:
         finetune(
             './models',
-            'MaskRCNN_202004032310.pt',
+            'MaskRCNN_202004062137.pt',
             dataset_base,
             half_precision=False,
-            num_epochs=4,
+            num_epochs=10,
             fixed_metaparameters={
-                'alpha': 0.003
+                'alpha': 0.005
             }
         )
     else:
-        test('./models/MaskRCNN_202004051526.pt',
+        test('./models/MaskRCNN_202004062137.pt',
              dataset_base,
              '../images', 15,
-             half_precision=False)
+             half_precision=False, test=True,
+             segmentation_alpha=0.3, threshold=0.4, mask_threshold=0.1)
 
 
 if __name__== "__main__":
