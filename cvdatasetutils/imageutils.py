@@ -63,7 +63,8 @@ def save_image(evaluation_path, image, name, title):
 
 
 def show_objects_in_image(evaluation_path, image, ground_truth, name, title, classes, colormap=None,
-                          predictions=None, prediction_classes=None, segmentation_alpha=0.7, threshold=0.5):
+                          predictions=None, prediction_classes=None, segmentation_alpha=0.7, threshold=0.6,
+                          mask_threshold=0.2):
     """
     Draw the objects and segmentation masks over the passed image (for separate images if containing the predictions)
 
@@ -89,12 +90,12 @@ def show_objects_in_image(evaluation_path, image, ground_truth, name, title, cla
         predictions['masks'] = predictions['masks'].squeeze()
         draw_objects_in_image("ex_{}_{}_pred.png", evaluation_path, image, predictions, name, title,
                               prediction_classes, colormap, segmentation_alpha, test=True,
-                              threshold=threshold)
+                              threshold=threshold, mask_threshold=mask_threshold)
 
 
 def draw_objects_in_image(img_name, evaluation_path, image, ground_truth, name, title,
                           classes, colormap=None, segmentation_alpha=0.8, test=False,
-                          threshold=0.5):
+                          threshold=0.5, mask_threshold=0.5):
 
     fig = plt.figure(frameon=False)
 
@@ -108,7 +109,7 @@ def draw_objects_in_image(img_name, evaluation_path, image, ground_truth, name, 
     draw_objects(ax, classes, ground_truth, colors, threshold=threshold, ground_truth=not test)
 
     if 'masks' in ground_truth.keys():
-        mask = generate_mask(ground_truth, colors, test)
+        mask = generate_mask(ground_truth, colors, test, mask_threshold=mask_threshold, obj_threshold=threshold)
     else:
         mask = None
 
@@ -128,13 +129,18 @@ def draw_objects_in_image(img_name, evaluation_path, image, ground_truth, name, 
     plt.close(fig)
 
 
-def generate_mask(ground_truth, colors, test):
+def generate_mask(ground_truth, colors, test, mask_threshold, obj_threshold):
 
     if test and ground_truth['labels'].shape == (1,):
         masks = ground_truth['masks']
         img_shape = masks.shape
         mask = np.zeros((*img_shape, 3))
-        masks = [(masks > 0.5).int().detach().cpu().numpy()]
+        masks = [(masks > mask_threshold).int().detach().cpu().numpy()]
+    elif test:
+        masks = ground_truth['masks']
+        img_shape = masks[0].shape
+        mask = np.zeros((*img_shape, 3))
+        masks = (masks > mask_threshold).int().detach().cpu().numpy()
     else:
         masks = ground_truth['masks']
         img_shape = masks[0].shape
@@ -146,6 +152,13 @@ def generate_mask(ground_truth, colors, test):
 
     for mask_id, obj_mask in enumerate(masks):
         color = mcolors.to_rgb(colors[(mask_id + 1) % len(colors)])
+
+        if test and ground_truth['scores'][mask_id] < obj_threshold:
+            continue
+
+        if test:
+            xs, ys, xe, ye = ground_truth['boxes'][mask_id].detach().cpu().numpy().round().astype(np.uint16)
+            obj_mask[ys:ye, xs:xe] = 1 - obj_mask[ys:ye, xs:xe]
 
         for color_index, color_value in enumerate(color):
             try:
